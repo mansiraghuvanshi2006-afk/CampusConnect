@@ -1,6 +1,23 @@
-import { sendSuccess } from "../utils/apiResponse.js";
-import messages from "../constants/messages.js";
+import mongoose from "mongoose";
+import asyncHandler from "express-async-handler";
 
-export const getHealth = (req, res) => {
-  sendSuccess(res, 200, messages.SERVER_RUNNING, { uptime: process.uptime() });
-};
+import { sendSuccess } from "../utils/ApiResponse.js";
+import messages from "../constants/messages.js";
+import httpStatus from "../constants/statusCodes.js";
+
+export const getHealth = asyncHandler(async (req, res) => {
+  return sendSuccess(
+    res,
+    httpStatus.OK,
+    messages.SERVER_RUNNING,
+    {
+      uptime: Math.floor(process.uptime()),
+      database:
+        mongoose.connection.readyState === 1
+          ? "connected"
+          : "disconnected",
+      environment: process.env.NODE_ENV,
+      timestamp: new Date().toISOString(),
+    }
+  );
+});

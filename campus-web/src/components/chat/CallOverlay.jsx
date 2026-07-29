@@ -150,7 +150,7 @@ const CallOverlay = ({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[80] flex flex-col bg-[#0b0c0f]/
+      className="fixed inset-0 z-[80] flex flex-col bg-[#0b0c0f]"
     >
       <header className="flex items-center justify-between px-4 py-3 text-white">
         <div>

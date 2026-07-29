@@ -332,10 +332,28 @@ const MessageBubble = ({
       </div>
 
       <div
-        className={`absolute top-0 ${
-          isMine ? "left-0 -translate-x-full pr-1" : "right-0 translate-x-full pl-1"
-        } hidden group-hover:flex`}
+        className={`absolute top-0 z-20 flex max-w-[min(100vw-2rem,20rem)] items-center gap-0.5 rounded-full border border-white/10 bg-[#1e1f22] p-1 shadow-lg opacity-0 pointer-events-none transition group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto max-md:opacity-100 max-md:pointer-events-auto ${
+          isMine
+            ? "left-0 -translate-x-full pr-1"
+            : "right-0 translate-x-full pl-1"
+        }`}
       >
+        {REACTION_EMOJIS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            aria-label={`React with ${emoji}`}
+            title={`React ${emoji}`}
+            onClick={() => {
+              setMenuOpen(false);
+              setReactOpen(false);
+              onReact?.(message, emoji);
+            }}
+            className="rounded-lg px-1 py-0.5 text-base leading-none hover:bg-white/10"
+          >
+            {emoji}
+          </button>
+        ))}
         <button
           type="button"
           aria-label="Message actions"
@@ -343,7 +361,7 @@ const MessageBubble = ({
             setMenuOpen((previous) => !previous);
             setReactOpen(false);
           }}
-          className="rounded-lg bg-[#1e1f22] p-1.5 text-[#b5bac1] shadow"
+          className="rounded-lg p-1.5 text-[#b5bac1] hover:bg-white/10"
         >
           <FiMoreHorizontal className="h-4 w-4" />
         </button>

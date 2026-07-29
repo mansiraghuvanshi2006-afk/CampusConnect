@@ -25,6 +25,7 @@ import {
   FiPlus,
   FiSearch,
   FiSend,
+  FiSmile,
   FiUsers,
   FiVideo,
   FiWifi,
@@ -38,6 +39,7 @@ import NewChatModal from "../../components/chat/NewChatModal.jsx";
 import CreateGroupModal from "../../components/chat/CreateGroupModal.jsx";
 import MessageBubble from "../../components/chat/MessageBubble.jsx";
 import VoiceRecorder from "../../components/chat/VoiceRecorder.jsx";
+import ChatEmojiPicker from "../../components/chat/ChatEmojiPicker.jsx";
 import CallOverlay from "../../components/chat/CallOverlay.jsx";
 import NotificationCenter from "../../components/chat/NotificationCenter.jsx";
 
@@ -140,6 +142,7 @@ const ChatPage = () => {
   const [replyTo, setReplyTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [threadSearch, setThreadSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
@@ -157,6 +160,7 @@ const ChatPage = () => {
     useState(false);
 
   const fileInputRef = useRef(null);
+  const emojiPickerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -166,6 +170,28 @@ const ChatPage = () => {
 
   const canCreateGroup =
     user?.role === "teacher" || user?.role === "admin";
+
+  useEffect(() => {
+    if (!emojiPickerOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (!emojiPickerRef.current?.contains(event.target)) {
+        setEmojiPickerOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [emojiPickerOpen]);
+
+  const insertComposerEmoji = (emoji) => {
+    setDraft((previous) => `${previous}${emoji}`);
+    setEmojiPickerOpen(false);
+  };
 
   const {
     localStream,
@@ -2075,6 +2101,32 @@ const ChatPage = () => {
                       >
                         <FiPaperclip className="h-5 w-5" />
                       </button>
+
+                      <div className="relative" ref={emojiPickerRef}>
+                        <button
+                          type="button"
+                          aria-label="Insert emoji"
+                          aria-expanded={emojiPickerOpen}
+                          onClick={() =>
+                            setEmojiPickerOpen((open) => !open)
+                          }
+                          className={`rounded-xl p-2 transition hover:bg-white/10 hover:text-white ${
+                            emojiPickerOpen
+                              ? "bg-white/10 text-white"
+                              : "text-[#b5bac1]"
+                          }`}
+                        >
+                          <FiSmile className="h-5 w-5" />
+                        </button>
+
+                        {emojiPickerOpen && (
+                          <div className="absolute bottom-full left-0 z-50 mb-2 w-[min(100vw-2rem,22rem)]">
+                            <ChatEmojiPicker
+                              onSelect={insertComposerEmoji}
+                            />
+                          </div>
+                        )}
+                      </div>
 
                       <VoiceRecorder
                         disabled={sending}

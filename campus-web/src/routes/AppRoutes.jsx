@@ -129,15 +129,16 @@ const AppRoutes = () => {
         />
 
         <Route
-          path="/verify-email"
-          element={<VerifyEmailPage />}
-        />
-
-        <Route
           path="/admin/login"
           element={<AdminLoginPage />}
         />
       </Route>
+
+      {/* Email verification must stay public — GuestRoute redirects logged-in users (e.g. admin) to their dashboard and skips verification */}
+      <Route
+        path="/verify-email"
+        element={<VerifyEmailPage />}
+      />
 
       {/* Student routes */}
       <Route

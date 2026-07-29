@@ -9,6 +9,8 @@ export const REACTION_EMOJIS = [
   "😮",
 ];
 
+/** Matches campus-api Message ALLOWED_REACTIONS — quick reactions on messages. */
+
 export const applyMessageUpdated = ({ messages, message }) => {
   if (!message?.id) {
     return messages;

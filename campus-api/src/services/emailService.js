@@ -45,14 +45,19 @@ export const sendVerificationEmail =
     rawToken,
     expirationMinutes,
   }) => {
-    const clientUrl =
+    const rawClientUrl =
       process.env.CLIENT_URL;
 
-    if (!clientUrl) {
+    if (!rawClientUrl) {
       throw new Error(
         "CLIENT_URL is missing"
       );
     }
+
+    const clientUrl = rawClientUrl
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\/admin(\/login)?$/i, "");
 
     const verificationUrl =
       `${clientUrl}/verify-email` +

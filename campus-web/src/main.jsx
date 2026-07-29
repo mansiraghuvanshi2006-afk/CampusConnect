@@ -9,6 +9,9 @@ import App from "./App.jsx";
 import {
   AuthProvider,
 } from "./context/AuthContext.jsx";
+import {
+  SocketProvider,
+} from "./socket/SocketProvider.jsx";
 
 import "./index.css";
 
@@ -18,7 +21,9 @@ ReactDOM.createRoot(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <SocketProvider>
+          <App />
+        </SocketProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

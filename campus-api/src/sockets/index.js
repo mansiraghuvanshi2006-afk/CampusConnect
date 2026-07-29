@@ -1,5 +1,10 @@
-const initializeSocket = (io) => {
-  // Socket.IO implementation will be added in Phase 6.
-};
+/**
+ * Socket.IO entry used by server bootstrap.
+ */
 
-export default initializeSocket;
+export {
+  initializeSocketServer as default,
+  initializeSocketServer,
+  getIO,
+  forceLeaveConversation,
+} from "./socketServer.js";

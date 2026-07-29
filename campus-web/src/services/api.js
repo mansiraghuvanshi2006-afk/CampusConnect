@@ -58,6 +58,14 @@ const refreshAccessToken = async () => {
           newAccessToken
         );
 
+        window.dispatchEvent(
+          new CustomEvent("auth:token-refreshed", {
+            detail: {
+              accessToken: newAccessToken,
+            },
+          })
+        );
+
         return newAccessToken;
       })
       .finally(() => {

@@ -235,6 +235,15 @@ const userSchema =
         type: Date,
         default: null,
       },
+
+      /*
+        Last time the user disconnected from chat.
+        Used for offline presence displays.
+      */
+      lastSeenAt: {
+        type: Date,
+        default: null,
+      },
     },
     {
       timestamps: true,

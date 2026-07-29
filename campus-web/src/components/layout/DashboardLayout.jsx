@@ -13,6 +13,12 @@ const roleNavigation = {
     {
       label: "Dashboard",
       to: "/student/dashboard",
+      end: true,
+    },
+    {
+      label: "Chat",
+      to: "/student/chat",
+      end: false,
     },
   ],
 
@@ -20,6 +26,12 @@ const roleNavigation = {
     {
       label: "Dashboard",
       to: "/teacher/dashboard",
+      end: true,
+    },
+    {
+      label: "Chat",
+      to: "/teacher/chat",
+      end: false,
     },
   ],
 
@@ -27,14 +39,22 @@ const roleNavigation = {
     {
       label: "Dashboard",
       to: "/admin/dashboard",
+      end: true,
+    },
+    {
+      label: "Chat",
+      to: "/admin/chat",
+      end: false,
     },
     {
       label: "Departments",
       to: "/admin/departments",
+      end: true,
     },
     {
       label: "Academic Years",
       to: "/admin/academic-years",
+      end: true,
     },
   ],
 };
@@ -124,7 +144,7 @@ const DashboardLayout = ({
             <NavLink
               key={item.to}
               to={item.to}
-              end
+              end={item.end !== false}
               className={
                 navigationLinkClass
               }
@@ -196,7 +216,7 @@ const DashboardLayout = ({
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  end
+                  end={item.end !== false}
                   className={({
                     isActive,
                   }) =>

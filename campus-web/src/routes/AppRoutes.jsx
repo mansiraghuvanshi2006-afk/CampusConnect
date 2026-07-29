@@ -1,4 +1,9 @@
 import {
+  lazy,
+  Suspense,
+} from "react";
+
+import {
   Navigate,
   Route,
   Routes,
@@ -22,23 +27,56 @@ import RegistrationSuccessPage from "../pages/auth/RegistrationSuccessPage.jsx";
 import VerifyEmailPage from "../pages/auth/VerifyEmailPage.jsx";
 
 import AdminLoginPage from "../pages/admin/AdminLoginPage.jsx";
-import AdminDashboard from "../pages/admin/AdminDashboard.jsx";
-import DepartmentsPage from "../pages/admin/DepartmentsPage.jsx";
-import AcademicYearsPage from "../pages/admin/AcademicYearsPage.jsx";
-import AdminUsersPage from "../pages/admin/AdminUsersPage.jsx";
 
-import StudentDashboard from "../pages/student/StudentDashboard.jsx";
 import StudentCompleteProfilePage from "../pages/student/StudentCompleteProfilePage.jsx";
 
-import TeacherDashboard from "../pages/teacher/TeacherDashboard.jsx";
 import TeacherCompleteProfilePage from "../pages/teacher/TeacherCompleteProfilePage.jsx";
 import TeacherApprovalPendingPage from "../pages/teacher/TeacherApprovalPendingPage.jsx";
 import TeacherApprovalRejectedPage from "../pages/teacher/TeacherApprovalRejectedPage.jsx";
 
 import NotFoundPage from "../pages/NotFoundPage.jsx";
 
+const StudentDashboard = lazy(
+  () => import("../pages/student/StudentDashboard.jsx")
+);
+
+const TeacherDashboard = lazy(
+  () => import("../pages/teacher/TeacherDashboard.jsx")
+);
+
+const AdminDashboard = lazy(
+  () => import("../pages/admin/AdminDashboard.jsx")
+);
+
+const DepartmentsPage = lazy(
+  () => import("../pages/admin/DepartmentsPage.jsx")
+);
+
+const AcademicYearsPage = lazy(
+  () => import("../pages/admin/AcademicYearsPage.jsx")
+);
+
+const AdminUsersPage = lazy(
+  () => import("../pages/admin/AdminUsersPage.jsx")
+);
+
+const ChatPage = lazy(
+  () => import("../pages/chat/ChatPage.jsx")
+);
+
+const RouteFallback = () => (
+  <div
+    className="flex min-h-[50vh] items-center justify-center bg-[#313338] text-sm text-[#b5bac1]"
+    role="status"
+    aria-live="polite"
+  >
+    Loading page...
+  </div>
+);
+
 const AppRoutes = () => {
   return (
+    <Suspense fallback={<RouteFallback />}>
     <Routes>
       {/* Public pages */}
       <Route element={<PublicLayout />}>
@@ -118,6 +156,16 @@ const AppRoutes = () => {
           path="/student/dashboard"
           element={<StudentDashboard />}
         />
+
+        <Route
+          path="/student/chat"
+          element={<ChatPage />}
+        />
+
+        <Route
+          path="/student/chat/:conversationId"
+          element={<ChatPage />}
+        />
       </Route>
 
       {/* Teacher routes */}
@@ -147,6 +195,16 @@ const AppRoutes = () => {
           path="/teacher/dashboard"
           element={<TeacherDashboard />}
         />
+
+        <Route
+          path="/teacher/chat"
+          element={<ChatPage />}
+        />
+
+        <Route
+          path="/teacher/chat/:conversationId"
+          element={<ChatPage />}
+        />
       </Route>
 
       {/* Admin routes */}
@@ -175,6 +233,16 @@ const AppRoutes = () => {
         <Route
           path="/admin/users"
           element={<AdminUsersPage />}
+        />
+
+        <Route
+          path="/admin/chat"
+          element={<ChatPage />}
+        />
+
+        <Route
+          path="/admin/chat/:conversationId"
+          element={<ChatPage />}
         />
       </Route>
 
@@ -215,6 +283,7 @@ const AppRoutes = () => {
         element={<NotFoundPage />}
       />
     </Routes>
+    </Suspense>
   );
 };
 

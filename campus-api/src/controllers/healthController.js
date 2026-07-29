@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import asyncHandler from "express-async-handler";
 
-import { sendSuccess } from "../utils/ApiResponse.js";
+import { sendSuccess } from "../utils/apiResponse.js";
 import messages from "../constants/messages.js";
 import httpStatus from "../constants/statusCodes.js";
 

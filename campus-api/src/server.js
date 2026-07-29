@@ -4,6 +4,7 @@ import http from "node:http";
 
 import app from "./app.js";
 import connectDB from "./config/database.js";
+import { initializeSocketServer } from "./sockets/socketServer.js";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
@@ -48,6 +49,8 @@ const startServer = async () => {
 
     const server = http.createServer(app);
 
+    await initializeSocketServer(server);
+
     server.listen(PORT, () => {
       console.log(
         `CampusConnect API running on port ${PORT}`
@@ -55,6 +58,10 @@ const startServer = async () => {
 
       console.log(
         `Health check: http://localhost:${PORT}/api/v1/health`
+      );
+
+      console.log(
+        `Socket.IO listening on the same HTTP server`
       );
     });
   } catch (error) {

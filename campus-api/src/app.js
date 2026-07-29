@@ -9,6 +9,7 @@ import authRoutes from "./routes/authRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import profileOptionRoutes from "./routes/profileOptionRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import chatRoutes from "./routes/chatRoutes.js";
 
 import notFound from "./middleware/notFound.js";
 import errorHandler from "./middleware/errorHandler.js";
@@ -81,6 +82,12 @@ app.use(
 app.use(
   "/api/v1/admin",
   adminRoutes
+);
+
+// Campus chat routes
+app.use(
+  "/api/v1/chat",
+  chatRoutes
 );
 
 // Handle unknown routes

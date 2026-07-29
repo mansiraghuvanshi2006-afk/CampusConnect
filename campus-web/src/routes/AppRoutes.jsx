@@ -22,10 +22,18 @@ import RegistrationSuccessPage from "../pages/auth/RegistrationSuccessPage.jsx";
 import VerifyEmailPage from "../pages/auth/VerifyEmailPage.jsx";
 
 import AdminLoginPage from "../pages/admin/AdminLoginPage.jsx";
+import AdminDashboard from "../pages/admin/AdminDashboard.jsx";
+import DepartmentsPage from "../pages/admin/DepartmentsPage.jsx";
+import AcademicYearsPage from "../pages/admin/AcademicYearsPage.jsx";
+import AdminUsersPage from "../pages/admin/AdminUsersPage.jsx";
 
 import StudentDashboard from "../pages/student/StudentDashboard.jsx";
+import StudentCompleteProfilePage from "../pages/student/StudentCompleteProfilePage.jsx";
+
 import TeacherDashboard from "../pages/teacher/TeacherDashboard.jsx";
-import AdminDashboard from "../pages/admin/AdminDashboard.jsx";
+import TeacherCompleteProfilePage from "../pages/teacher/TeacherCompleteProfilePage.jsx";
+import TeacherApprovalPendingPage from "../pages/teacher/TeacherApprovalPendingPage.jsx";
+import TeacherApprovalRejectedPage from "../pages/teacher/TeacherApprovalRejectedPage.jsx";
 
 import NotFoundPage from "../pages/NotFoundPage.jsx";
 
@@ -79,9 +87,7 @@ const AppRoutes = () => {
 
         <Route
           path="/registration-success"
-          element={
-            <RegistrationSuccessPage />
-          }
+          element={<RegistrationSuccessPage />}
         />
 
         <Route
@@ -104,6 +110,11 @@ const AppRoutes = () => {
         }
       >
         <Route
+          path="/student/complete-profile"
+          element={<StudentCompleteProfilePage />}
+        />
+
+        <Route
           path="/student/dashboard"
           element={<StudentDashboard />}
         />
@@ -117,6 +128,21 @@ const AppRoutes = () => {
           />
         }
       >
+        <Route
+          path="/teacher/complete-profile"
+          element={<TeacherCompleteProfilePage />}
+        />
+
+        <Route
+          path="/teacher/approval-pending"
+          element={<TeacherApprovalPendingPage />}
+        />
+
+        <Route
+          path="/teacher/approval-rejected"
+          element={<TeacherApprovalRejectedPage />}
+        />
+
         <Route
           path="/teacher/dashboard"
           element={<TeacherDashboard />}
@@ -135,9 +161,24 @@ const AppRoutes = () => {
           path="/admin/dashboard"
           element={<AdminDashboard />}
         />
+
+        <Route
+          path="/admin/departments"
+          element={<DepartmentsPage />}
+        />
+
+        <Route
+          path="/admin/academic-years"
+          element={<AcademicYearsPage />}
+        />
+
+        <Route
+          path="/admin/users"
+          element={<AdminUsersPage />}
+        />
       </Route>
 
-      {/* Redirect old dashboard URLs */}
+      {/* Redirect short URLs */}
       <Route
         path="/student"
         element={

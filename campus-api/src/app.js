@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import healthRoutes from "./routes/healthRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
+import profileOptionRoutes from "./routes/profileOptionRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 
 import notFound from "./middleware/notFound.js";
@@ -68,6 +69,12 @@ app.use(
 app.use(
   "/api/v1/profile",
   profileRoutes
+);
+
+// Active departments and academic years used during profile setup
+app.use(
+  "/api/v1/profile-options",
+  profileOptionRoutes
 );
 
 // Admin routes

@@ -2,10 +2,14 @@ import express from "express";
 
 import {
   approveTeacher,
+  deleteUserPermanently,
   getAdminDashboard,
+  getAdminUserById,
   getAllUsers,
   getPendingTeachers,
   rejectTeacher,
+  updateAdminUser,
+  updateUserStatus,
 } from "../controllers/adminController.js";
 
 import authenticate from "../middleware/authenticate.js";
@@ -21,6 +25,7 @@ import {
 import { USER_ROLES } from "../models/User.js";
 
 import departmentRoutes from "./admin/departmentRoutes.js";
+import adminAcademicYearRoutes from "./adminAcademicYearRoutes.js";
 
 const router = express.Router();
 
@@ -71,10 +76,64 @@ router.patch(
 
 /**
  * GET /api/v1/admin/users
+ *
+ * Supported query examples:
+ * /users?type=all
+ * /users?type=students
+ * /users?type=teachers
+ * /users?type=pending-teachers
+ * /users?type=active
+ * /users?type=inactive
  */
 router.get(
   "/users",
   getAllUsers
+);
+
+/**
+ * GET /api/v1/admin/users/:id
+ *
+ * Returns one user.
+ */
+router.get(
+  "/users/:id",
+  getAdminUserById
+);
+
+/**
+ * PATCH /api/v1/admin/users/:id/status
+ *
+ * Body:
+ * {
+ *   "isActive": true
+ * }
+ */
+router.patch(
+  "/users/:id/status",
+  updateUserStatus
+);
+
+/**
+ * PATCH /api/v1/admin/users/:id
+ *
+ * Updates user information.
+ */
+router.patch(
+  "/users/:id",
+  updateAdminUser
+);
+
+/**
+ * DELETE /api/v1/admin/users/:id
+ *
+ * Body:
+ * {
+ *   "confirmation": "DELETE"
+ * }
+ */
+router.delete(
+  "/users/:id",
+  deleteUserPermanently
 );
 
 /**
@@ -89,6 +148,20 @@ router.get(
 router.use(
   "/departments",
   departmentRoutes
+);
+
+/**
+ * Academic year routes
+ *
+ * GET    /api/v1/admin/departments/:departmentId/years
+ * POST   /api/v1/admin/departments/:departmentId/years
+ * GET    /api/v1/admin/academic-years/:academicYearId
+ * PATCH  /api/v1/admin/academic-years/:academicYearId
+ * DELETE /api/v1/admin/academic-years/:academicYearId
+ */
+router.use(
+  "/",
+  adminAcademicYearRoutes
 );
 
 export default router;

@@ -63,6 +63,8 @@ const getPublicUser = (user) => ({
     user.teacherApprovalStatus,
   teacherApprovedAt:
     user.teacherApprovedAt,
+  teacherRejectionReason:
+    user.teacherRejectionReason,
 
   lastLoginAt:
     user.lastLoginAt,
@@ -133,37 +135,26 @@ const ensureUserCanLogin = (user) => {
     );
   }
 
-  if (
-    user.role === USER_ROLES.TEACHER &&
-    user.teacherApprovalStatus ===
-      TEACHER_APPROVAL_STATUSES.PENDING
-  ) {
-    throw new ApiError(
-      403,
-      "Your email is verified, but your teacher account is awaiting administrator approval"
-    );
-  }
+  if (user.role === USER_ROLES.TEACHER) {
+    const hasSupportedApprovalStatus = [
+      TEACHER_APPROVAL_STATUSES.PENDING,
+      TEACHER_APPROVAL_STATUSES.REJECTED,
+      TEACHER_APPROVAL_STATUSES.APPROVED,
+    ].includes(user.teacherApprovalStatus);
 
-  if (
-    user.role === USER_ROLES.TEACHER &&
-    user.teacherApprovalStatus ===
-      TEACHER_APPROVAL_STATUSES.REJECTED
-  ) {
-    throw new ApiError(
-      403,
-      "Your teacher registration was not approved"
-    );
-  }
+    if (!hasSupportedApprovalStatus) {
+      throw new ApiError(403, "Your teacher account is not available");
+    }
 
-  if (
-    user.role === USER_ROLES.TEACHER &&
-    user.teacherApprovalStatus !==
-      TEACHER_APPROVAL_STATUSES.APPROVED
-  ) {
-    throw new ApiError(
-      403,
-      "Your teacher account is not approved"
-    );
+    if (
+      user.teacherApprovalStatus ===
+        TEACHER_APPROVAL_STATUSES.APPROVED &&
+      !user.isActive
+    ) {
+      throw new ApiError(403, "This account has been disabled");
+    }
+
+    return;
   }
 
   if (!user.isActive) {
@@ -182,19 +173,28 @@ const userCanRefreshSession = (user) => {
     return false;
   }
 
-  if (!user.isEmailVerified || !user.isActive) {
+  if (!user.isEmailVerified) {
     return false;
   }
 
-  if (
-    user.role === USER_ROLES.TEACHER &&
-    user.teacherApprovalStatus !==
-      TEACHER_APPROVAL_STATUSES.APPROVED
-  ) {
-    return false;
+  if (user.role === USER_ROLES.TEACHER) {
+    if (
+      [
+        TEACHER_APPROVAL_STATUSES.PENDING,
+        TEACHER_APPROVAL_STATUSES.REJECTED,
+      ].includes(user.teacherApprovalStatus)
+    ) {
+      return true;
+    }
+
+    return (
+      user.teacherApprovalStatus ===
+        TEACHER_APPROVAL_STATUSES.APPROVED &&
+      user.isActive
+    );
   }
 
-  return true;
+  return user.isActive;
 };
 
 /**
@@ -674,7 +674,7 @@ export const verifyEmail = asyncHandler(
 
     const message =
       user.role === USER_ROLES.TEACHER
-        ? "Email verified successfully. Your teacher account is awaiting administrator approval."
+        ? "Email verified successfully. Sign in to complete your teacher profile."
         : "Email verified successfully. Your account is now active.";
 
     return res.status(200).json({

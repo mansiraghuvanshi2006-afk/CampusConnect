@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { z } from "zod";
@@ -66,7 +66,7 @@ const RegisterPage = () => {
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: {
       errors,
       isSubmitting,
@@ -84,7 +84,10 @@ const RegisterPage = () => {
     },
   });
 
-  const selectedRole = watch("role");
+  const selectedRole = useWatch({
+    control,
+    name: "role",
+  });
 
   const onSubmit = async (formData) => {
     try {

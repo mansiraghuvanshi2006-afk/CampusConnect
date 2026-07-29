@@ -13,22 +13,6 @@ import {
     return "/login";
   };
   
-  const getDashboardPath = (role) => {
-    switch (role) {
-      case "admin":
-        return "/admin/dashboard";
-  
-      case "teacher":
-        return "/teacher/dashboard";
-  
-      case "student":
-        return "/student/dashboard";
-  
-      default:
-        return "/";
-    }
-  };
-  
   const RoleRoute = ({
     children,
     allowedRoles = [],
@@ -38,6 +22,7 @@ import {
     const {
       user,
       isLoading,
+      getDashboardPath,
     } = useAuth();
   
     if (isLoading) {
@@ -72,7 +57,7 @@ import {
     ) {
       return (
         <Navigate
-          to={getDashboardPath(user.role)}
+          to={getDashboardPath(user)}
           replace
         />
       );

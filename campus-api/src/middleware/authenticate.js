@@ -1,4 +1,7 @@
-import User from "../models/User.js";
+import User, {
+  USER_ROLES,
+  TEACHER_APPROVAL_STATUSES,
+} from "../models/User.js";
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { verifyAccessToken } from "../services/tokenService.js";
@@ -40,7 +43,15 @@ const authenticate = asyncHandler(async (req, res, next) => {
     );
   }
 
-  if (!user.isActive) {
+  const isLimitedTeacher =
+    user.role === USER_ROLES.TEACHER &&
+    user.isEmailVerified &&
+    [
+      TEACHER_APPROVAL_STATUSES.PENDING,
+      TEACHER_APPROVAL_STATUSES.REJECTED,
+    ].includes(user.teacherApprovalStatus);
+
+  if (!user.isActive && !isLimitedTeacher) {
     throw new ApiError(
       403,
       "This account has been disabled"

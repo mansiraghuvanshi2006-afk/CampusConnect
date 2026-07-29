@@ -26,11 +26,23 @@ const departmentDescriptionSchema = z
   .trim()
   .max(500, "Department description cannot exceed 500 characters");
 
+const durationInYearsSchema = z.coerce
+  .number({
+    required_error: "Department duration is required",
+    invalid_type_error: "Department duration must be a number",
+  })
+  .int("Department duration must be a whole number")
+  .min(1, "Department duration must be at least 1 year")
+  .max(10, "Department duration cannot exceed 10 years");
+
 export const createDepartmentSchema = z.object({
   name: departmentNameSchema,
+
   code: departmentCodeSchema,
 
   description: departmentDescriptionSchema.optional().default(""),
+
+  durationInYears: durationInYearsSchema,
 
   isActive: z.boolean().optional().default(true),
 });
@@ -42,6 +54,8 @@ export const updateDepartmentSchema = z
     code: departmentCodeSchema.optional(),
 
     description: departmentDescriptionSchema.optional(),
+
+    durationInYears: durationInYearsSchema.optional(),
 
     isActive: z.boolean().optional(),
   })

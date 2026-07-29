@@ -1,6 +1,16 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  useNavigate,
+} from "react-router-dom";
+
 import toast from "react-hot-toast";
+
+import DashboardLayout from "../../components/layout/DashboardLayout.jsx";
 
 import {
   approveTeacher,
@@ -8,10 +18,6 @@ import {
   getPendingTeachers,
   rejectTeacher,
 } from "../../services/adminService.js";
-
-import {
-  logoutUser,
-} from "../../services/authService.js";
 
 import getErrorMessage from "../../utils/getErrorMessage.js";
 
@@ -38,66 +44,89 @@ const AdminDashboard = () => {
   const [error, setError] =
     useState("");
 
-  const [processingTeacherId, setProcessingTeacherId] =
-    useState(null);
+  const [
+    processingTeacherId,
+    setProcessingTeacherId,
+  ] = useState(null);
 
-  const [rejectingTeacher, setRejectingTeacher] =
-    useState(null);
+  const [
+    rejectingTeacher,
+    setRejectingTeacher,
+  ] = useState(null);
 
-  const [rejectionReason, setRejectionReason] =
-    useState("");
+  const [
+    rejectionReason,
+    setRejectionReason,
+  ] = useState("");
 
-  const loadDashboardData = async () => {
-    try {
-      setIsLoading(true);
-      setError("");
+  const loadDashboardData =
+    useCallback(async () => {
+      try {
+        setIsLoading(true);
+        setError("");
 
-      const [
-        dashboardData,
-        pendingTeachersData,
-      ] = await Promise.all([
-        getAdminDashboard(),
-        getPendingTeachers(),
-      ]);
+        const [
+          dashboardData,
+          pendingTeachersData,
+        ] = await Promise.all([
+          getAdminDashboard(),
+          getPendingTeachers(),
+        ]);
 
-      setStats(
-        dashboardData?.stats ||
-          initialStats
-      );
-
-      setTeachers(
-        pendingTeachersData?.teachers ||
-          []
-      );
-    } catch (error) {
-      const message =
-        getErrorMessage(
-          error,
-          "Unable to load admin dashboard"
+        setStats(
+          dashboardData?.stats ||
+            initialStats
         );
 
-      setError(message);
-      toast.error(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+        setTeachers(
+          pendingTeachersData?.teachers ||
+            []
+        );
+      } catch (error) {
+        const message =
+          getErrorMessage(
+            error,
+            "Unable to load admin dashboard"
+          );
+
+        setError(message);
+        toast.error(message);
+      } finally {
+        setIsLoading(false);
+      }
+    }, []);
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    const timeoutId = window.setTimeout(
+      loadDashboardData,
+      0
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadDashboardData]);
 
   const handleApprove = async (
     teacher
   ) => {
+    const teacherId =
+      teacher._id || teacher.id;
+
+    if (!teacherId) {
+      toast.error(
+        "Teacher ID is unavailable"
+      );
+
+      return;
+    }
+
     try {
       setProcessingTeacherId(
-        teacher.id
+        teacherId
       );
 
       const response =
         await approveTeacher(
-          teacher.id
+          teacherId
         );
 
       toast.success(
@@ -139,8 +168,20 @@ const AdminDashboard = () => {
   ) => {
     event.preventDefault();
 
+    const teacherId =
+      rejectingTeacher?._id ||
+      rejectingTeacher?.id;
+
     const trimmedReason =
       rejectionReason.trim();
+
+    if (!teacherId) {
+      toast.error(
+        "Teacher ID is unavailable"
+      );
+
+      return;
+    }
 
     if (trimmedReason.length < 3) {
       toast.error(
@@ -152,12 +193,12 @@ const AdminDashboard = () => {
 
     try {
       setProcessingTeacherId(
-        rejectingTeacher.id
+        teacherId
       );
 
       const response =
         await rejectTeacher(
-          rejectingTeacher.id,
+          teacherId,
           trimmedReason
         );
 
@@ -182,290 +223,436 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-
-      toast.success(
-        "Logged out successfully"
-      );
-
-      navigate("/admin/login", {
-        replace: true,
-      });
-    } catch (error) {
-      toast.error(
-        getErrorMessage(
-          error,
-          "Unable to log out"
-        )
-      );
-    }
-  };
-
   const statCards = [
     {
       title: "Total Users",
       value: stats.totalUsers,
+      description:
+        "View all registered users",
+      path:
+        "/admin/users?type=all",
     },
     {
       title: "Students",
       value: stats.totalStudents,
+      description:
+        "Manage student accounts",
+      path:
+        "/admin/users?type=students",
     },
     {
       title: "Teachers",
       value: stats.totalTeachers,
+      description:
+        "Manage teacher accounts",
+      path:
+        "/admin/users?type=teachers",
     },
     {
       title: "Pending Teachers",
       value: stats.pendingTeachers,
+      description:
+        "Review teacher requests",
+      path:
+        "/admin/users?type=pending-teachers",
     },
     {
       title: "Active Users",
       value: stats.activeUsers,
+      description:
+        "View active user accounts",
+      path:
+        "/admin/users?type=active",
     },
   ];
 
+  const handleStatCardClick = (
+    card
+  ) => {
+    navigate(card.path);
+  };
+
+  const rejectingTeacherId =
+    rejectingTeacher?._id ||
+    rejectingTeacher?.id;
+
   return (
-    <main className="min-h-screen bg-[#313338] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-purple-300">
-              CampusConnect Admin
-            </p>
+    <DashboardLayout
+      title="Admin Dashboard"
+      description="Manage CampusConnect users, departments, academic years, and teacher approvals."
+    >
+      {isLoading && (
+        <div className="rounded-2xl border border-white/10 bg-[#2b2d31] p-10 text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-purple-400" />
 
-            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
-              Admin Dashboard
-            </h1>
+          <p className="mt-4 text-[#b5bac1]">
+            Loading dashboard...
+          </p>
+        </div>
+      )}
 
-            <p className="mt-2 text-[#b5bac1]">
-              Manage users and teacher approvals.
-            </p>
-          </div>
+      {!isLoading && error && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-5">
+          <p className="font-semibold text-red-300">
+            Unable to load dashboard
+          </p>
+
+          <p className="mt-1 text-sm text-red-200/80">
+            {error}
+          </p>
 
           <button
             type="button"
-            onClick={handleLogout}
-            className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white transition hover:bg-red-700"
+            onClick={loadDashboardData}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
           >
-            Logout
+            Try again
           </button>
         </div>
+      )}
 
-        {isLoading && (
-          <div className="rounded-2xl border border-white/10 bg-[#2b2d31] p-10 text-center">
-            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-purple-400" />
+      {!isLoading && !error && (
+        <>
+          <section>
+            <div className="mb-4">
+              <h2 className="text-xl font-bold text-white">
+                Campus Management
+              </h2>
 
-            <p className="mt-4 text-[#b5bac1]">
-              Loading dashboard...
-            </p>
-          </div>
-        )}
+              <p className="mt-1 text-sm text-[#b5bac1]">
+                Manage the main academic structure of CampusConnect.
+              </p>
+            </div>
 
-        {!isLoading && error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-5">
-            <p className="font-semibold text-red-300">
-              Unable to load dashboard
-            </p>
+            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    "/admin/departments"
+                  )
+                }
+                className="group rounded-2xl border border-purple-500/20 bg-[#2b2d31] p-6 text-left transition hover:-translate-y-1 hover:border-purple-400/50 hover:bg-[#32343a]"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-purple-300">
+                      Departments
+                    </p>
 
-            <p className="mt-1 text-sm text-red-200/80">
-              {error}
-            </p>
+                    <h3 className="mt-2 text-xl font-bold text-white">
+                      Manage Departments
+                    </h3>
 
-            <button
-              type="button"
-              onClick={loadDashboardData}
-              className="mt-4 rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
-            >
-              Try again
-            </button>
-          </div>
-        )}
+                    <p className="mt-2 text-sm leading-6 text-[#b5bac1]">
+                      Create, edit,
+                      activate, deactivate,
+                      or delete campus
+                      departments.
+                    </p>
+                  </div>
 
-        {!isLoading && !error && (
-          <>
-            <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+                  <span className="text-2xl text-purple-300 transition group-hover:translate-x-1">
+                    →
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    "/admin/academic-years"
+                  )
+                }
+                className="group rounded-2xl border border-white/10 bg-[#2b2d31] p-6 text-left transition hover:-translate-y-1 hover:border-white/20 hover:bg-[#32343a]"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-blue-300">
+                      Academic Years
+                    </p>
+
+                    <h3 className="mt-2 text-xl font-bold text-white">
+                      Manage Years
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-[#b5bac1]">
+                      Add years such as
+                      first, second, third,
+                      and fourth year to
+                      each department.
+                    </p>
+                  </div>
+
+                  <span className="text-2xl text-blue-300 transition group-hover:translate-x-1">
+                    →
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    "/admin/users?type=all"
+                  )
+                }
+                className="group rounded-2xl border border-white/10 bg-[#2b2d31] p-6 text-left transition hover:-translate-y-1 hover:border-white/20 hover:bg-[#32343a]"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-green-300">
+                      Users
+                    </p>
+
+                    <h3 className="mt-2 text-xl font-bold text-white">
+                      Manage Users
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-[#b5bac1]">
+                      View students and
+                      teachers, edit their
+                      information, and
+                      manage their accounts.
+                    </p>
+                  </div>
+
+                  <span className="text-2xl text-green-300 transition group-hover:translate-x-1">
+                    →
+                  </span>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section className="mt-8">
+            <div className="mb-4">
+              <h2 className="text-xl font-bold text-white">
+                User Overview
+              </h2>
+
+              <p className="mt-1 text-sm text-[#b5bac1]">
+                Select a card to view
+                its related users.
+              </p>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
               {statCards.map((card) => (
-                <article
+                <button
                   key={card.title}
-                  className="rounded-2xl border border-white/10 bg-[#2b2d31] p-6 shadow-lg shadow-black/10"
+                  type="button"
+                  onClick={() =>
+                    handleStatCardClick(
+                      card
+                    )
+                  }
+                  className="rounded-2xl border border-white/10 bg-[#2b2d31] p-6 text-left shadow-lg shadow-black/10 transition hover:-translate-y-1 hover:border-purple-400/40 hover:bg-[#32343a]"
                 >
                   <p className="text-sm text-[#b5bac1]">
                     {card.title}
                   </p>
 
-                  <h2 className="mt-3 text-4xl font-bold">
+                  <h2 className="mt-3 text-4xl font-bold text-white">
                     {card.value}
                   </h2>
-                </article>
-              ))}
-            </section>
 
-            <section className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-[#2b2d31]">
-              <div className="flex flex-col gap-3 border-b border-white/10 p-6 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">
-                    Pending Teacher Approvals
-                  </h2>
-
-                  <p className="mt-2 text-sm text-[#b5bac1]">
-                    Review verified teacher accounts before giving access.
+                  <p className="mt-3 text-xs text-purple-300">
+                    {card.description} →
                   </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={loadDashboardData}
-                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold transition hover:bg-white/10"
-                >
-                  Refresh
                 </button>
+              ))}
+            </div>
+          </section>
+
+          <section
+            id="pending-teachers"
+            className="mt-8 scroll-mt-6 overflow-hidden rounded-2xl border border-white/10 bg-[#2b2d31]"
+          >
+            <div className="flex flex-col gap-3 border-b border-white/10 p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-white">
+                  Pending Teacher
+                  Approvals
+                </h2>
+
+                <p className="mt-2 text-sm text-[#b5bac1]">
+                  Review verified
+                  teacher accounts before
+                  giving access.
+                </p>
               </div>
 
-              {teachers.length === 0 ? (
-                <div className="p-10 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 text-2xl text-green-300">
-                    ✓
-                  </div>
+              <button
+                type="button"
+                onClick={
+                  loadDashboardData
+                }
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Refresh
+              </button>
+            </div>
 
-                  <h3 className="mt-4 text-lg font-semibold">
-                    No pending teachers
-                  </h3>
-
-                  <p className="mt-2 text-sm text-[#b5bac1]">
-                    All verified teacher requests have been reviewed.
-                  </p>
+            {teachers.length === 0 ? (
+              <div className="p-10 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 text-2xl text-green-300">
+                  ✓
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left">
-                    <thead className="bg-black/20 text-xs uppercase tracking-wide text-[#b5bac1]">
-                      <tr>
-                        <th className="px-6 py-4">
-                          Teacher
-                        </th>
 
-                        <th className="px-6 py-4">
-                          Email
-                        </th>
+                <h3 className="mt-4 text-lg font-semibold text-white">
+                  No pending teachers
+                </h3>
 
-                        <th className="px-6 py-4">
-                          Registered
-                        </th>
+                <p className="mt-2 text-sm text-[#b5bac1]">
+                  All verified teacher
+                  requests have been
+                  reviewed.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left">
+                  <thead className="bg-black/20 text-xs uppercase tracking-wide text-[#b5bac1]">
+                    <tr>
+                      <th className="px-6 py-4">
+                        Teacher
+                      </th>
 
-                        <th className="px-6 py-4">
-                          Status
-                        </th>
+                      <th className="px-6 py-4">
+                        Email
+                      </th>
 
-                        <th className="px-6 py-4 text-right">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
+                      <th className="px-6 py-4">
+                        Registered
+                      </th>
 
-                    <tbody>
-                      {teachers.map(
-                        (teacher) => {
-                          const isProcessing =
-                            processingTeacherId ===
-                            teacher.id;
+                      <th className="px-6 py-4">
+                        Status
+                      </th>
 
-                          return (
-                            <tr
-                              key={teacher.id}
-                              className="border-t border-white/10"
-                            >
-                              <td className="px-6 py-5">
-                                <p className="font-semibold text-white">
-                                  {teacher.name}
-                                </p>
-                              </td>
+                      <th className="px-6 py-4 text-right">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
 
-                              <td className="px-6 py-5 text-sm text-[#b5bac1]">
-                                {teacher.email}
-                              </td>
+                  <tbody>
+                    {teachers.map(
+                      (teacher) => {
+                        const teacherId =
+                          teacher._id ||
+                          teacher.id;
 
-                              <td className="px-6 py-5 text-sm text-[#b5bac1]">
-                                {teacher.createdAt
-                                  ? new Date(
-                                      teacher.createdAt
-                                    ).toLocaleDateString(
-                                      "en-IN",
-                                      {
-                                        day: "2-digit",
-                                        month: "short",
-                                        year: "numeric",
-                                      }
+                        const isProcessing =
+                          processingTeacherId ===
+                          teacherId;
+
+                        return (
+                          <tr
+                            key={teacherId}
+                            className="border-t border-white/10"
+                          >
+                            <td className="px-6 py-5">
+                              <p className="font-semibold text-white">
+                                {
+                                  teacher.name
+                                }
+                              </p>
+                            </td>
+
+                            <td className="px-6 py-5 text-sm text-[#b5bac1]">
+                              {
+                                teacher.email
+                              }
+                            </td>
+
+                            <td className="px-6 py-5 text-sm text-[#b5bac1]">
+                              {teacher.createdAt
+                                ? new Date(
+                                    teacher.createdAt
+                                  ).toLocaleDateString(
+                                    "en-IN",
+                                    {
+                                      day:
+                                        "2-digit",
+                                      month:
+                                        "short",
+                                      year:
+                                        "numeric",
+                                    }
+                                  )
+                                : "Unknown"}
+                            </td>
+
+                            <td className="px-6 py-5">
+                              <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs font-semibold text-yellow-200">
+                                Pending
+                              </span>
+                            </td>
+
+                            <td className="px-6 py-5">
+                              <div className="flex justify-end gap-3">
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isProcessing
+                                  }
+                                  onClick={() =>
+                                    handleApprove(
+                                      teacher
                                     )
-                                  : "Unknown"}
-                              </td>
+                                  }
+                                  className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isProcessing
+                                    ? "Processing..."
+                                    : "Approve"}
+                                </button>
 
-                              <td className="px-6 py-5">
-                                <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs font-semibold text-yellow-200">
-                                  Pending
-                                </span>
-                              </td>
-
-                              <td className="px-6 py-5">
-                                <div className="flex justify-end gap-3">
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      isProcessing
-                                    }
-                                    onClick={() =>
-                                      handleApprove(
-                                        teacher
-                                      )
-                                    }
-                                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {isProcessing
-                                      ? "Processing..."
-                                      : "Approve"}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      isProcessing
-                                    }
-                                    onClick={() =>
-                                      openRejectDialog(
-                                        teacher
-                                      )
-                                    }
-                                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Reject
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        }
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-      </div>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isProcessing
+                                  }
+                                  onClick={() =>
+                                    openRejectDialog(
+                                      teacher
+                                    )
+                                  }
+                                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       {rejectingTeacher && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
           <section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2b2d31] p-6 shadow-2xl">
-            <h2 className="text-xl font-bold">
+            <h2 className="text-xl font-bold text-white">
               Reject Teacher
             </h2>
 
             <p className="mt-2 text-sm text-[#b5bac1]">
-              Provide a reason for rejecting{" "}
+              Provide a reason for
+              rejecting{" "}
               <span className="font-semibold text-white">
-                {rejectingTeacher.name}
+                {
+                  rejectingTeacher.name
+                }
               </span>
               .
             </p>
@@ -476,7 +663,7 @@ const AdminDashboard = () => {
             >
               <label
                 htmlFor="rejectionReason"
-                className="mb-2 block text-sm font-semibold"
+                className="mb-2 block text-sm font-semibold text-white"
               >
                 Rejection reason
               </label>
@@ -493,7 +680,7 @@ const AdminDashboard = () => {
                 maxLength={500}
                 disabled={
                   processingTeacherId ===
-                  rejectingTeacher.id
+                  rejectingTeacherId
                 }
                 placeholder="Explain why this teacher registration is being rejected"
                 className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
@@ -505,19 +692,24 @@ const AdminDashboard = () => {
                 </span>
 
                 <span>
-                  {rejectionReason.length}/500
+                  {
+                    rejectionReason.length
+                  }
+                  /500
                 </span>
               </div>
 
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={closeRejectDialog}
+                  onClick={
+                    closeRejectDialog
+                  }
                   disabled={
                     processingTeacherId ===
-                    rejectingTeacher.id
+                    rejectingTeacherId
                   }
-                  className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 font-semibold transition hover:bg-white/10 disabled:opacity-50"
+                  className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 font-semibold text-white transition hover:bg-white/10 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -526,12 +718,12 @@ const AdminDashboard = () => {
                   type="submit"
                   disabled={
                     processingTeacherId ===
-                    rejectingTeacher.id
+                    rejectingTeacherId
                   }
                   className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {processingTeacherId ===
-                  rejectingTeacher.id
+                  rejectingTeacherId
                     ? "Rejecting..."
                     : "Reject Teacher"}
                 </button>
@@ -540,7 +732,7 @@ const AdminDashboard = () => {
           </section>
         </div>
       )}
-    </main>
+    </DashboardLayout>
   );
 };
 

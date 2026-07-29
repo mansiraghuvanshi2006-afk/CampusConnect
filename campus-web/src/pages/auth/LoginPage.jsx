@@ -77,7 +77,7 @@ const LoginPage = () => {
 
       const requestedPath = location.state?.from;
 
-      const dashboardPath = getDashboardPath(user.role);
+      const dashboardPath = getDashboardPath(user);
 
       navigate(requestedPath || dashboardPath, {
         replace: true,
@@ -148,12 +148,6 @@ const LoginPage = () => {
                 Password
               </label>
 
-              <Link
-                to="/forgot-password"
-                className="text-xs font-medium text-blue-300 hover:underline"
-              >
-                Forgot password?
-              </Link>
             </div>
             <PasswordInput
               id="password"

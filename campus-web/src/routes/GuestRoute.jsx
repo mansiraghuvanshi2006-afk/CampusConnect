@@ -23,7 +23,7 @@ import {
     if (user) {
       return (
         <Navigate
-          to={getDashboardPath(user.role)}
+          to={getDashboardPath(user)}
           replace
         />
       );

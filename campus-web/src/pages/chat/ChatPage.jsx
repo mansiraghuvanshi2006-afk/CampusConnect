@@ -25,7 +25,6 @@ import {
   FiPlus,
   FiSearch,
   FiSend,
-  FiSmile,
   FiUsers,
   FiVideo,
   FiWifi,
@@ -37,19 +36,38 @@ import { MdOutlinePushPin } from "react-icons/md";
 import DashboardLayout from "../../components/layout/DashboardLayout.jsx";
 import NewChatModal from "../../components/chat/NewChatModal.jsx";
 import CreateGroupModal from "../../components/chat/CreateGroupModal.jsx";
+import MessageBubble from "../../components/chat/MessageBubble.jsx";
+import VoiceRecorder from "../../components/chat/VoiceRecorder.jsx";
+import CallOverlay from "../../components/chat/CallOverlay.jsx";
+import NotificationCenter from "../../components/chat/NotificationCenter.jsx";
 
 import { useAuth } from "../../context/AuthContext.jsx";
 import useSocket from "../../socket/useSocket.js";
+import useWebRTCCall from "../../hooks/useWebRTCCall.js";
 import { emitWithAck } from "../../socket/socketClient.js";
 
 import {
+  acceptCall,
   createDirectConversation,
   createGroup,
+  deleteMessageForEveryone,
+  deleteMessageForMe,
+  editMessage,
+  endCall,
+  forwardMessage,
   getConversations,
   getMessages,
+  getPinnedMessages,
+  getUnreadNotificationCount,
   markConversationRead,
+  pinMessage,
+  reactToMessage,
+  rejectCall,
+  searchMessages,
   sendMessageRest,
+  startCall,
   toggleConversationPin,
+  uploadChatAttachments,
 } from "../../services/chatService.js";
 
 import getErrorMessage, {
@@ -78,6 +96,12 @@ import {
   applyStopTyping,
   applyTypingUsers,
 } from "../../utils/chatRealtimeState.js";
+
+import {
+  applyMessageDeletedForEveryone,
+  applyMessageDeletedForMe,
+  applyMessageUpdated,
+} from "../../utils/chatPhase5State.js";
 
 const ChatPage = () => {
   const navigate = useNavigate();
@@ -113,11 +137,26 @@ const ChatPage = () => {
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [threadSearch, setThreadSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [forwardTarget, setForwardTarget] = useState(null);
+  const [activeCall, setActiveCall] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [notificationUnread, setNotificationUnread] =
+    useState(0);
+  const [recordingVoice, setRecordingVoice] = useState(false);
 
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [createGroupOpen, setCreateGroupOpen] =
     useState(false);
 
+  const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -127,6 +166,27 @@ const ChatPage = () => {
 
   const canCreateGroup =
     user?.role === "teacher" || user?.role === "admin";
+
+  const {
+    localStream,
+    remoteStreams,
+    muted,
+    cameraOff,
+    screenSharing,
+    connectionState,
+    toggleMute,
+    toggleCamera,
+    switchCamera,
+    toggleScreenShare,
+  } = useWebRTCCall({
+    socket,
+    currentUserId,
+    activeCall:
+      activeCall?.status === "active" ||
+      activeCall?.status === "ringing"
+        ? activeCall
+        : null,
+  });
 
   const filteredConversations = useMemo(() => {
     const query = sidebarSearch.trim().toLowerCase();
@@ -170,6 +230,9 @@ const ChatPage = () => {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadConversations();
+      getUnreadNotificationCount()
+        .then(setNotificationUnread)
+        .catch(() => {});
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -547,6 +610,86 @@ const ChatPage = () => {
       }
     };
 
+    const handleMessageEdited = (payload) => {
+      if (!payload?.message) return;
+      setMessages((previous) =>
+        applyMessageUpdated({
+          messages: previous,
+          message: payload.message,
+        })
+      );
+    };
+
+    const handleMessageDeleted = (payload) => {
+      if (payload?.scope === "me" && payload.messageId) {
+        setMessages((previous) =>
+          applyMessageDeletedForMe({
+            messages: previous,
+            messageId: payload.messageId,
+          })
+        );
+        return;
+      }
+
+      if (payload?.message) {
+        setMessages((previous) =>
+          applyMessageDeletedForEveryone({
+            messages: previous,
+            message: payload.message,
+          })
+        );
+      }
+    };
+
+    const handleMessageReaction = (payload) => {
+      if (!payload?.message) return;
+      setMessages((previous) =>
+        applyMessageUpdated({
+          messages: previous,
+          message: payload.message,
+        })
+      );
+    };
+
+    const handleMessagePinned = (payload) => {
+      if (!payload?.message) return;
+      setMessages((previous) =>
+        applyMessageUpdated({
+          messages: previous,
+          message: payload.message,
+        })
+      );
+    };
+
+    const handleCallIncoming = (payload) => {
+      if (payload?.call) {
+        setIncomingCall(payload.call);
+      }
+    };
+
+    const handleCallRinging = (payload) => {
+      if (payload?.call) {
+        setActiveCall(payload.call);
+      }
+    };
+
+    const handleCallAccept = (payload) => {
+      if (payload?.call) {
+        setActiveCall(payload.call);
+        setIncomingCall(null);
+      }
+    };
+
+    const handleCallEndLike = (payload) => {
+      if (!payload?.call) return;
+      setActiveCall((previous) =>
+        previous?.id === payload.call.id ? null : previous
+      );
+      setIncomingCall((previous) =>
+        previous?.id === payload.call.id ? null : previous
+      );
+    };
+
     socket.on("message:new", handleMessageNew);
     socket.on("message:delivered", handleDelivered);
     socket.on("message:read", handleRead);
@@ -559,6 +702,16 @@ const ChatPage = () => {
     socket.on("member:removed", handleMemberRemoved);
     socket.on("member:added", handleMemberAdded);
     socket.on("connect", handleReconnect);
+    socket.on("message:edited", handleMessageEdited);
+    socket.on("message:deleted", handleMessageDeleted);
+    socket.on("message:reaction", handleMessageReaction);
+    socket.on("message:pinned", handleMessagePinned);
+    socket.on("call:incoming", handleCallIncoming);
+    socket.on("call:ringing", handleCallRinging);
+    socket.on("call:accept", handleCallAccept);
+    socket.on("call:end", handleCallEndLike);
+    socket.on("call:reject", handleCallEndLike);
+    socket.on("call:busy", handleCallEndLike);
 
     return () => {
       socket.off("message:new", handleMessageNew);
@@ -573,6 +726,16 @@ const ChatPage = () => {
       socket.off("member:removed", handleMemberRemoved);
       socket.off("member:added", handleMemberAdded);
       socket.off("connect", handleReconnect);
+      socket.off("message:edited", handleMessageEdited);
+      socket.off("message:deleted", handleMessageDeleted);
+      socket.off("message:reaction", handleMessageReaction);
+      socket.off("message:pinned", handleMessagePinned);
+      socket.off("call:incoming", handleCallIncoming);
+      socket.off("call:ringing", handleCallRinging);
+      socket.off("call:accept", handleCallAccept);
+      socket.off("call:end", handleCallEndLike);
+      socket.off("call:reject", handleCallEndLike);
+      socket.off("call:busy", handleCallEndLike);
     };
   }, [
     socket,
@@ -673,7 +836,41 @@ const ChatPage = () => {
       return;
     }
 
+    if (editingMessage) {
+      setSending(true);
+
+      try {
+        let saved;
+
+        if (socket?.connected) {
+          const data = await emitWithAck("message:edit", {
+            messageId: editingMessage.id,
+            text,
+          });
+          saved = data.message;
+        } else {
+          saved = await editMessage(editingMessage.id, text);
+        }
+
+        setMessages((previous) =>
+          applyMessageUpdated({
+            messages: previous,
+            message: saved,
+          })
+        );
+        setEditingMessage(null);
+        setDraft("");
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Unable to edit"));
+      } finally {
+        setSending(false);
+      }
+
+      return;
+    }
+
     const temporaryId = createTemporaryId();
+    const replyToId = replyTo?.id || null;
     const optimistic = {
       id: temporaryId,
       temporaryId,
@@ -685,6 +882,13 @@ const ChatPage = () => {
         name: user?.name,
         role: user?.role,
       },
+      replyTo: replyTo
+        ? {
+            id: replyTo.id,
+            text: replyTo.text,
+            sender: replyTo.sender,
+          }
+        : null,
       deliveredTo: [],
       seenBy: [],
       createdAt: new Date().toISOString(),
@@ -692,6 +896,7 @@ const ChatPage = () => {
     };
 
     setDraft("");
+    setReplyTo(null);
     setSending(true);
     setMessages((previous) =>
       mergeMessages(previous, [optimistic])
@@ -707,6 +912,7 @@ const ChatPage = () => {
           conversationId,
           text,
           temporaryId,
+          replyTo: replyToId,
         });
 
         saved = data.message;
@@ -714,6 +920,7 @@ const ChatPage = () => {
         saved = await sendMessageRest(conversationId, {
           text,
           temporaryId,
+          replyTo: replyToId,
         });
       }
 
@@ -912,6 +1119,301 @@ const ChatPage = () => {
           "Unable to update pin state"
         )
       );
+    }
+  };
+
+  const upsertMessageLocal = (message) => {
+    setMessages((previous) =>
+      applyMessageUpdated({ messages: previous, message })
+    );
+  };
+
+  const handleReact = async (message, emoji) => {
+    try {
+      let saved;
+
+      if (socket?.connected) {
+        const data = await emitWithAck("message:react", {
+          messageId: message.id,
+          emoji,
+        });
+        saved = data.message;
+      } else {
+        saved = await reactToMessage(message.id, emoji);
+      }
+
+      upsertMessageLocal(saved);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to react"));
+    }
+  };
+
+  const handleDeleteMe = async (message) => {
+    try {
+      if (socket?.connected) {
+        await emitWithAck("message:delete", {
+          messageId: message.id,
+          scope: "me",
+        });
+      } else {
+        await deleteMessageForMe(message.id);
+      }
+
+      setMessages((previous) =>
+        applyMessageDeletedForMe({
+          messages: previous,
+          messageId: message.id,
+        })
+      );
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to delete"));
+    }
+  };
+
+  const handleDeleteEveryone = async (message) => {
+    try {
+      let saved;
+
+      if (socket?.connected) {
+        const data = await emitWithAck("message:delete", {
+          messageId: message.id,
+          scope: "everyone",
+        });
+        saved = data.message;
+      } else {
+        saved = await deleteMessageForEveryone(message.id);
+      }
+
+      setMessages((previous) =>
+        applyMessageDeletedForEveryone({
+          messages: previous,
+          message: saved,
+        })
+      );
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to delete"));
+    }
+  };
+
+  const handlePinMessage = async (message) => {
+    try {
+      let saved;
+
+      if (socket?.connected) {
+        const data = await emitWithAck("message:pin", {
+          messageId: message.id,
+          pinned: !message.pinned,
+        });
+        saved = data.message;
+      } else {
+        saved = await pinMessage(message.id, !message.pinned);
+      }
+
+      upsertMessageLocal(saved);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to pin"));
+    }
+  };
+
+  const handleForward = async (message) => {
+    setForwardTarget(message);
+  };
+
+  const confirmForward = async (targetConversationId) => {
+    if (!forwardTarget) return;
+
+    try {
+      if (socket?.connected) {
+        await emitWithAck("message:forward", {
+          messageId: forwardTarget.id,
+          conversationIds: [targetConversationId],
+        });
+      } else {
+        await forwardMessage(forwardTarget.id, [
+          targetConversationId,
+        ]);
+      }
+
+      toast.success("Message forwarded");
+      setForwardTarget(null);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to forward"));
+    }
+  };
+
+  const handleAttachFiles = async (event) => {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+
+    if (!files.length || !conversationId) {
+      return;
+    }
+
+    setSending(true);
+    setUploadProgress(0);
+
+    try {
+      const saved = await uploadChatAttachments(conversationId, {
+        files,
+        text: draft.trim(),
+        replyTo: replyTo?.id,
+        temporaryId: createTemporaryId(),
+        onProgress: setUploadProgress,
+      });
+
+      setMessages((previous) => mergeMessages(previous, [saved]));
+      setDraft("");
+      setReplyTo(null);
+      scrollToBottom(true);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Upload failed"));
+    } finally {
+      setSending(false);
+      setUploadProgress(null);
+    }
+  };
+
+  const handleVoiceSend = async ({ file, duration, waveForm }) => {
+    if (!conversationId) return;
+
+    setRecordingVoice(false);
+    setSending(true);
+    setUploadProgress(0);
+
+    try {
+      const saved = await uploadChatAttachments(conversationId, {
+        files: [file],
+        asVoice: true,
+        duration,
+        waveForm,
+        replyTo: replyTo?.id,
+        temporaryId: createTemporaryId(),
+        onProgress: setUploadProgress,
+      });
+
+      setMessages((previous) => mergeMessages(previous, [saved]));
+      setReplyTo(null);
+      scrollToBottom(true);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Voice upload failed"));
+    } finally {
+      setSending(false);
+      setUploadProgress(null);
+    }
+  };
+
+  const handleThreadSearch = async (value) => {
+    setThreadSearch(value);
+
+    if (!conversationId || !value.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    try {
+      const result = await searchMessages(conversationId, {
+        q: value.trim(),
+      });
+      setSearchResults(result.messages || []);
+    } catch {
+      setSearchResults([]);
+    }
+  };
+
+  const loadPinned = async () => {
+    if (!conversationId) return;
+
+    try {
+      const list = await getPinnedMessages(conversationId);
+      setPinnedMessages(list);
+      setShowPinned(true);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to load pins"));
+    }
+  };
+
+  const jumpToMessage = (messageId) => {
+    const node = document.getElementById(`message-${messageId}`);
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const handleStartCall = async (type) => {
+    if (!conversationId) return;
+
+    try {
+      let call;
+
+      if (socket?.connected) {
+        const data = await emitWithAck("call:start", {
+          conversationId,
+          type,
+        });
+        call = data.call;
+      } else {
+        call = await startCall(conversationId, { type });
+      }
+
+      setActiveCall(call);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to start call"));
+    }
+  };
+
+  const handleAcceptIncoming = async () => {
+    if (!incomingCall) return;
+
+    try {
+      let call;
+
+      if (socket?.connected) {
+        const data = await emitWithAck("call:accept", {
+          callId: incomingCall.id,
+        });
+        call = data.call;
+      } else {
+        call = await acceptCall(incomingCall.id);
+      }
+
+      setActiveCall(call);
+      setIncomingCall(null);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to accept call"));
+    }
+  };
+
+  const handleRejectIncoming = async () => {
+    if (!incomingCall) return;
+
+    try {
+      if (socket?.connected) {
+        await emitWithAck("call:reject", {
+          callId: incomingCall.id,
+        });
+      } else {
+        await rejectCall(incomingCall.id);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIncomingCall(null);
+    }
+  };
+
+  const handleEndActiveCall = async () => {
+    if (!activeCall) return;
+
+    try {
+      if (socket?.connected) {
+        await emitWithAck("call:end", {
+          callId: activeCall.id,
+        });
+      } else {
+        await endCall(activeCall.id);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setActiveCall(null);
     }
   };
 
@@ -1282,14 +1784,28 @@ const ChatPage = () => {
                 </div>
 
                 <div className="relative flex items-center gap-1">
+                  <NotificationCenter
+                    socket={socket}
+                    unreadCount={notificationUnread}
+                    setUnreadCount={setNotificationUnread}
+                    onOpenConversation={(id) =>
+                      navigate(`${chatBasePath}/${id}`)
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    aria-label="Search messages"
+                    onClick={() => setShowSearch((prev) => !prev)}
+                    className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
+                  >
+                    <FiSearch className="h-5 w-5" />
+                  </button>
+
                   <button
                     type="button"
                     aria-label="Start audio call"
-                    onClick={() =>
-                      toast(
-                        "Audio calling will be available in the calling phase."
-                      )
-                    }
+                    onClick={() => handleStartCall("audio")}
                     className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
                   >
                     <FiPhone className="h-5 w-5" />
@@ -1298,11 +1814,7 @@ const ChatPage = () => {
                   <button
                     type="button"
                     aria-label="Start video call"
-                    onClick={() =>
-                      toast(
-                        "Video calling will be available in the calling phase."
-                      )
-                    }
+                    onClick={() => handleStartCall("video")}
                     className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
                   >
                     <FiVideo className="h-5 w-5" />
@@ -1334,6 +1846,18 @@ const ChatPage = () => {
 
                       <button
                         type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          loadPinned();
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                      >
+                        <MdOutlinePushPin className="h-4 w-4" />
+                        Pinned messages
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setMenuOpen(false)}
                         className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
                       >
@@ -1344,6 +1868,60 @@ const ChatPage = () => {
                   )}
                 </div>
               </header>
+
+              {showSearch && (
+                <div className="border-b border-white/10 bg-[#2b2d31] px-3 py-2">
+                  <input
+                    value={threadSearch}
+                    onChange={(event) =>
+                      handleThreadSearch(event.target.value)
+                    }
+                    placeholder="Search in conversation…"
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none"
+                  />
+                  {searchResults.length > 0 && (
+                    <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-[#1e1f22]">
+                      {searchResults.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => jumpToMessage(item.id)}
+                          className="block w-full truncate px-3 py-2 text-left text-xs text-[#dbdee1] hover:bg-white/5"
+                        >
+                          {item.text || item.type}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showPinned && (
+                <div className="border-b border-white/10 bg-[#2b2d31] px-3 py-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="text-xs font-semibold text-purple-200">
+                      Pinned messages
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs text-[#b5bac1]"
+                      onClick={() => setShowPinned(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {pinnedMessages.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => jumpToMessage(item.id)}
+                      className="mb-1 block w-full truncate rounded-lg bg-black/20 px-2 py-1.5 text-left text-xs text-[#dbdee1]"
+                    >
+                      {item.text || item.type}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div
                 ref={messagesContainerRef}
@@ -1404,55 +1982,33 @@ const ChatPage = () => {
                         </div>
                       )}
 
-                      {isSystem ? (
+                      {isSystem || message.type === "call" ? (
                         <div className="flex justify-center py-1">
                           <span className="rounded-full bg-black/20 px-3 py-1 text-[11px] text-[#b5bac1]">
                             {message.text}
                           </span>
                         </div>
                       ) : (
-                        <div
-                          className={`flex ${
-                            isMine
-                              ? "justify-end"
-                              : "justify-start"
-                          }`}
-                        >
-                          <div
-                            className={`max-w-[85%] rounded-2xl px-3 py-2 sm:max-w-[70%] ${
-                              isMine
-                                ? "rounded-br-md bg-purple-600 text-white"
-                                : "rounded-bl-md bg-[#2b2d31] text-[#dbdee1]"
-                            }`}
-                          >
-                            {!isMine &&
-                              activeConversation?.type !==
-                                "direct" && (
-                                <p className="mb-1 text-[11px] font-semibold text-purple-200">
-                                  {message.sender?.name}
-                                </p>
-                              )}
-
-                            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                              {message.text}
-                            </p>
-
-                            <div
-                              className={`mt-1 flex items-center gap-1 ${
-                                isMine
-                                  ? "justify-end"
-                                  : "justify-start"
-                              }`}
-                            >
-                              <span className="text-[10px] opacity-70">
-                                {formatMessageTime(
-                                  message.createdAt
-                                )}
-                              </span>
-                              {renderReceipt(message)}
-                            </div>
-                          </div>
-                        </div>
+                        <MessageBubble
+                          message={message}
+                          isMine={isMine}
+                          isGroup={
+                            activeConversation?.type !== "direct"
+                          }
+                          currentUserId={currentUserId}
+                          onReply={setReplyTo}
+                          onReact={handleReact}
+                          onEdit={(item) => {
+                            setEditingMessage(item);
+                            setDraft(item.text || "");
+                          }}
+                          onDeleteMe={handleDeleteMe}
+                          onDeleteEveryone={handleDeleteEveryone}
+                          onForward={handleForward}
+                          onPin={handlePinMessage}
+                          onJumpToReply={jumpToMessage}
+                          renderReceipt={renderReceipt}
+                        />
                       )}
                     </div>
                   )
@@ -1469,69 +2025,104 @@ const ChatPage = () => {
                     messages in this conversation.
                   </p>
                 ) : (
-                  <div className="flex items-end gap-2">
-                    <button
-                      type="button"
-                      aria-label="Emoji"
-                      onClick={() =>
-                        toast(
-                          "Emoji picker coming soon"
-                        )
-                      }
-                      className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
-                    >
-                      <FiSmile className="h-5 w-5" />
-                    </button>
+                  <div className="space-y-2">
+                    {(replyTo || editingMessage) && (
+                      <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2 text-xs text-[#b5bac1]">
+                        <span>
+                          {editingMessage
+                            ? "Editing message"
+                            : `Replying to ${replyTo?.sender?.name || "message"}`}
+                          {!editingMessage && replyTo?.text
+                            ? `: ${replyTo.text}`
+                            : ""}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyTo(null);
+                            setEditingMessage(null);
+                            if (editingMessage) setDraft("");
+                          }}
+                        >
+                          <FiX className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
 
-                    <button
-                      type="button"
-                      aria-label="Attach file"
-                      onClick={() =>
-                        toast(
-                          "Attachments coming soon"
-                        )
-                      }
-                      className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
-                    >
-                      <FiPaperclip className="h-5 w-5" />
-                    </button>
+                    {uploadProgress != null && (
+                      <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
+                        <div
+                          className="h-full bg-purple-500 transition-all"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    )}
 
-                    <textarea
-                      value={draft}
-                      onChange={(event) =>
-                        handleDraftChange(
-                          event.target.value
-                        )
-                      }
-                      onKeyDown={(event) => {
-                        if (
-                          event.key === "Enter" &&
-                          !event.shiftKey
-                        ) {
-                          event.preventDefault();
-                          handleSend();
+                    <div className="flex items-end gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={handleAttachFiles}
+                      />
+
+                      <button
+                        type="button"
+                        aria-label="Attach file"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
+                      >
+                        <FiPaperclip className="h-5 w-5" />
+                      </button>
+
+                      <VoiceRecorder
+                        disabled={sending}
+                        onCancel={() => setRecordingVoice(false)}
+                        onSend={handleVoiceSend}
+                      />
+
+                      <textarea
+                        value={draft}
+                        onChange={(event) =>
+                          handleDraftChange(
+                            event.target.value
+                          )
                         }
-                      }}
-                      rows={1}
-                      placeholder="Type a message"
-                      className="max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-400"
-                    />
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.shiftKey
+                          ) {
+                            event.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        rows={1}
+                        placeholder={
+                          editingMessage
+                            ? "Edit message"
+                            : "Type a message"
+                        }
+                        className="max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-400"
+                      />
 
-                    <button
-                      type="button"
-                      aria-label="Send message"
-                      onClick={handleSend}
-                      disabled={
-                        !draft.trim() || sending
-                      }
-                      className="rounded-xl bg-purple-600 p-3 text-white transition hover:bg-purple-500 disabled:opacity-50"
-                    >
-                      {sending ? (
-                        <FiLoader className="h-5 w-5 animate-spin" />
-                      ) : (
-                        <FiSend className="h-5 w-5" />
-                      )}
-                    </button>
+                      <button
+                        type="button"
+                        aria-label="Send message"
+                        onClick={handleSend}
+                        disabled={
+                          !draft.trim() || sending
+                        }
+                        className="rounded-xl bg-purple-600 p-3 text-white transition hover:bg-purple-500 disabled:opacity-50"
+                      >
+                        {sending ? (
+                          <FiLoader className="h-5 w-5 animate-spin" />
+                        ) : (
+                          <FiSend className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 )}
               </footer>
@@ -1556,6 +2147,62 @@ const ChatPage = () => {
           currentUser={user}
         />
       ) : null}
+
+      {forwardTarget ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1e1f22] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-semibold text-white">
+                Forward message
+              </h3>
+              <button
+                type="button"
+                onClick={() => setForwardTarget(null)}
+              >
+                <FiX className="h-5 w-5 text-[#b5bac1]" />
+              </button>
+            </div>
+            <div className="max-h-80 space-y-1 overflow-y-auto">
+              {conversations
+                .filter((item) => item.id !== conversationId)
+                .map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => confirmForward(item.id)}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-white/5"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600/30 text-xs font-bold text-purple-100">
+                      {getInitials(getConversationTitle(item))}
+                    </span>
+                    <span className="truncate text-sm text-white">
+                      {getConversationTitle(item)}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <CallOverlay
+        call={activeCall}
+        incomingCall={incomingCall}
+        currentUserId={currentUserId}
+        localStream={localStream}
+        remoteStreams={remoteStreams}
+        muted={muted}
+        cameraOff={cameraOff}
+        screenSharing={screenSharing}
+        connectionState={connectionState}
+        onAccept={handleAcceptIncoming}
+        onReject={handleRejectIncoming}
+        onEnd={handleEndActiveCall}
+        onToggleMute={toggleMute}
+        onToggleCamera={toggleCamera}
+        onSwitchCamera={switchCamera}
+        onToggleScreenShare={toggleScreenShare}
+      />
     </DashboardLayout>
   );
 };

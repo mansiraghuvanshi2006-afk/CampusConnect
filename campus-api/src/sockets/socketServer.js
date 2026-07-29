@@ -19,6 +19,11 @@ import {
   clearAllTypingForSocket,
 } from "./handlers/conversationSocketHandler.js";
 
+import {
+  registerAdvancedMessageHandlers,
+  registerCallHandlers,
+} from "./handlers/advancedChatSocketHandler.js";
+
 import { createSocketRateLimiter } from "./socketHelpers.js";
 
 import {
@@ -81,6 +86,8 @@ export const initializeSocketServer = (httpServer) => {
 
       registerConversationHandlers(io, socket);
       registerMessageHandlers(io, socket, rateLimitSend);
+      registerAdvancedMessageHandlers(io, socket);
+      registerCallHandlers(io, socket);
 
       const snapshot = await getScopedPresenceSnapshot(
         userId

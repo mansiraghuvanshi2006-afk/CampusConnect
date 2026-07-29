@@ -1,3 +1,6 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -13,6 +16,12 @@ import chatRoutes from "./routes/chatRoutes.js";
 
 import notFound from "./middleware/notFound.js";
 import errorHandler from "./middleware/errorHandler.js";
+import { UPLOAD_ROOT } from "./middleware/uploadMiddleware.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+void __dirname;
+void __filename;
 
 const app = express();
 
@@ -22,8 +31,12 @@ if (process.env.NODE_ENV === "production") {
 
 app.disable("x-powered-by");
 
-// Security middleware
-app.use(helmet());
+// Security middleware — allow cross-origin media for chat attachments
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 // CORS
 app.use(
@@ -53,6 +66,15 @@ app.use(
 
 // Cookie parsing
 app.use(cookieParser());
+
+// Static chat uploads (validated at write time)
+app.use(
+  "/uploads",
+  express.static(UPLOAD_ROOT, {
+    fallthrough: true,
+    maxAge: "7d",
+  })
+);
 
 // Health routes
 app.use(

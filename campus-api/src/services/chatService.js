@@ -27,7 +27,10 @@ import {
   formatConversation,
   formatMessage,
   formatSafeUser,
+  populateMessageQuery,
 } from "../utils/chatSerializers.js";
+
+import { enrichTextMessageFields } from "./messageAdvancedService.js";
 
 import { withOptionalTransaction } from "../utils/mongoTransaction.js";
 
@@ -61,20 +64,7 @@ const populateConversation = (query) =>
       },
     });
 
-const populateMessage = (query) =>
-  query
-    .populate({
-      path: "sender",
-      select: "name role email",
-    })
-    .populate({
-      path: "replyTo",
-      select: "text sender createdAt",
-      populate: {
-        path: "sender",
-        select: "name role",
-      },
-    });
+const populateMessage = (query) => populateMessageQuery(query);
 
 export const listEligibleUsers = async (
   currentUser,
@@ -602,6 +592,7 @@ export const getMessages = async (
   const query = {
     conversation: conversationId,
     isActive: true,
+    deletedFor: { $ne: currentUser._id },
   };
 
   if (params.before && isValidObjectId(params.before)) {
@@ -633,11 +624,14 @@ export const getMessages = async (
   );
 
   return {
-    messages: ordered.map((message) =>
-      formatMessage(message, {
-        receipts: receiptMap.get(String(message._id)) || [],
-      })
-    ),
+    messages: ordered
+      .map((message) =>
+        formatMessage(message, {
+          receipts: receiptMap.get(String(message._id)) || [],
+          viewerId: currentUser._id,
+        })
+      )
+      .filter(Boolean),
     pagination: {
       hasMore,
       nextCursor: ordered.length
@@ -721,6 +715,11 @@ export const sendTextMessage = async (
     }
   }
 
+  const { mentions, linkPreview } = await enrichTextMessageFields(
+    text,
+    conversation
+  );
+
   let message;
 
   try {
@@ -731,6 +730,8 @@ export const sendTextMessage = async (
       text,
       temporaryId: payload.temporaryId || null,
       replyTo: payload.replyTo || null,
+      mentions,
+      linkPreview,
     });
   } catch (error) {
     if (error?.code === 11000 && payload.temporaryId) {

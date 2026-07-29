@@ -31,3 +31,8 @@ Thumbs.db
 
 # Coverage
 coverage/
+# Uploads
+campus-api/uploads/
+**/uploads/chat/
+!**/.gitkeep
+

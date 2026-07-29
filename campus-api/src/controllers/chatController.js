@@ -264,6 +264,32 @@ export const sendMessage = asyncHandler(async (req, res) => {
         message: result.message,
         senderId: req.user._id,
       });
+
+      const { createNotificationsForMembers, NOTIFICATION_TYPES } =
+        await import("../services/notificationService.js");
+
+      const memberIds = (result.conversation.members || [])
+        .filter((member) => member.isActive)
+        .map((member) => member.user);
+
+      const hasMentions = (result.message.mentions || []).length > 0;
+      const isReply = Boolean(result.message.replyTo);
+
+      await createNotificationsForMembers({
+        memberIds,
+        excludeUserId: req.user._id,
+        type: hasMentions
+          ? NOTIFICATION_TYPES.MENTION
+          : isReply
+            ? NOTIFICATION_TYPES.REPLY
+            : NOTIFICATION_TYPES.MESSAGE,
+        title: req.user.name || "New message",
+        body: result.message.text || "New message",
+        conversationId: result.message.conversationId,
+        messageId: result.message.id,
+        actorId: req.user._id,
+        io,
+      });
     });
   }
 

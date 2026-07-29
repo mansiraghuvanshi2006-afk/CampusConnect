@@ -318,6 +318,53 @@ export const emitNewMessageCascade = async ({
   return { deliveredUserIds };
 };
 
+export const emitMessageLifecycle = async ({
+  io,
+  eventName,
+  message,
+  extra = {},
+}) => {
+  if (!io || !message) {
+    return;
+  }
+
+  const conversationId = message.conversationId?.toString?.() ||
+    message.conversationId;
+
+  const payload = {
+    message,
+    ...extra,
+  };
+
+  io.to(conversationRoom(conversationId)).emit(eventName, payload);
+
+  try {
+    const conversation = await Conversation.findById(conversationId)
+      .select("members")
+      .lean();
+
+    for (const member of conversation?.members || []) {
+      if (!member.isActive) {
+        continue;
+      }
+
+      io.to(userRoom(member.user.toString())).emit(
+        eventName,
+        payload
+      );
+    }
+  } catch {
+    // Best-effort fan-out
+  }
+
+  if (eventName === "message:edited" || eventName === "message:deleted") {
+    await emitConversationUpdateToMembers({
+      io,
+      conversationId,
+    });
+  }
+};
+
 export {
   upsertDeliveredReceipts,
   upsertSeenReceipts,

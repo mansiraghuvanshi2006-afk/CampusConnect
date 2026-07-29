@@ -157,3 +157,75 @@ export const markReadSchema = z
       .nullable(),
   })
   .strict();
+
+export const messageIdParamsSchema = z
+  .object({
+    messageId: objectIdSchema,
+  })
+  .strict();
+
+export const notificationIdParamsSchema = z
+  .object({
+    notificationId: objectIdSchema,
+  })
+  .strict();
+
+export const callIdParamsSchema = z
+  .object({
+    callId: objectIdSchema,
+  })
+  .strict();
+
+export const editMessageSchema = z
+  .object({
+    text: z
+      .string({
+        required_error: "Message text is required",
+      })
+      .trim()
+      .min(1, "Message text is required")
+      .max(5000, "Message text cannot exceed 5000 characters"),
+  })
+  .strict();
+
+export const reactMessageSchema = z
+  .object({
+    emoji: z
+      .string({
+        required_error: "Emoji is required",
+      })
+      .trim()
+      .min(1)
+      .max(8),
+  })
+  .strict();
+
+export const pinMessageSchema = z
+  .object({
+    pinned: z.boolean().optional(),
+  })
+  .strict();
+
+export const forwardMessageSchema = z
+  .object({
+    conversationIds: z
+      .array(objectIdSchema)
+      .min(1, "At least one conversation is required")
+      .max(10),
+  })
+  .strict();
+
+export const startCallSchema = z
+  .object({
+    type: z.enum(["audio", "video"]).default("audio"),
+    mode: z.enum(["direct", "group"]).optional(),
+  })
+  .strict();
+
+export const callMediaSchema = z
+  .object({
+    muted: z.boolean().optional(),
+    cameraOff: z.boolean().optional(),
+    screenSharing: z.boolean().optional(),
+  })
+  .strict();

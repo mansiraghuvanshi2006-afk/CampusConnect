@@ -12,6 +12,16 @@ import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import { sendWelcomeEmail } from "../services/emailService.js";
 
+import {
+  assertActiveAcademicYears,
+  assertNoServerControlledFields,
+  countActiveAdmins,
+  createUserAsAdmin,
+  deleteUserAsAdmin,
+  getActiveDepartment,
+  resetUserPasswordAsAdmin,
+} from "../services/adminUserService.js";
+
 /**
  * Check MongoDB ObjectId before querying.
  */
@@ -31,22 +41,55 @@ const escapeRegex = (value) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
+ * Serialize a populated or raw department reference.
+ */
+const getPublicDepartment = (department) => {
+  if (!department) {
+    return null;
+  }
+
+  if (!department.name) {
+    return {
+      id: department._id
+        ? department._id.toString()
+        : department.toString(),
+    };
+  }
+
+  return {
+    id: department._id.toString(),
+    name: department.name,
+    code: department.code,
+    isActive: department.isActive,
+  };
+};
+
+/**
  * Return only safe user information.
+ *
+ * Passwords, verification tokens and other internal
+ * security fields must never be included.
  */
 const getPublicUser = (user) => ({
   id: user._id.toString(),
   name: user.name,
   email: user.email,
   role: user.role,
-  department: user.department || null,
+  department: getPublicDepartment(user.department),
   year: user.year ?? null,
   teachingYears: user.teachingYears || [],
   profileCompleted: user.profileCompleted,
   isEmailVerified: user.isEmailVerified,
   isActive: user.isActive,
+  mustChangePassword: Boolean(
+    user.mustChangePassword
+  ),
   teacherApprovalStatus: user.teacherApprovalStatus,
   teacherApprovedAt: user.teacherApprovedAt,
   teacherRejectionReason: user.teacherRejectionReason,
+  createdBy: user.createdBy
+    ? user.createdBy.toString()
+    : null,
   lastLoginAt: user.lastLoginAt,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
@@ -65,6 +108,11 @@ const buildAdminUserFilter = (type) => {
     case "teachers":
       return {
         role: USER_ROLES.TEACHER,
+      };
+
+    case "admins":
+      return {
+        role: USER_ROLES.ADMIN,
       };
 
     case "pending-teachers":
@@ -322,12 +370,21 @@ export const rejectTeacher = asyncHandler(
  *
  * /users?search=name
  * /users?page=1&limit=20
+ *
+ * Additional filters:
+ *
+ * /users?role=student
+ * /users?department=<departmentId>
+ * /users?year=2
  */
 export const getAllUsers = asyncHandler(
   async (req, res) => {
     const {
       type = "all",
       search = "",
+      role,
+      department,
+      year,
       page = 1,
       limit = 20,
     } = req.query;
@@ -336,6 +393,7 @@ export const getAllUsers = asyncHandler(
       "all",
       "students",
       "teachers",
+      "admins",
       "pending-teachers",
       "active",
       "inactive",
@@ -350,26 +408,90 @@ export const getAllUsers = asyncHandler(
 
     const filter = buildAdminUserFilter(type);
 
+    /*
+      Year and search both need $or, so they are combined
+      with $and to avoid overwriting each other.
+    */
+    const andConditions = [];
+
+    if (role) {
+      if (
+        !Object.values(USER_ROLES).includes(role)
+      ) {
+        throw new ApiError(
+          400,
+          "Invalid user role filter"
+        );
+      }
+
+      filter.role = role;
+    }
+
+    if (department) {
+      if (
+        !mongoose.isValidObjectId(department)
+      ) {
+        throw new ApiError(
+          400,
+          "Invalid department filter"
+        );
+      }
+
+      filter.department = department;
+    }
+
+    if (year) {
+      const yearNumber = Number(year);
+
+      if (
+        !Object.values(
+          ACADEMIC_YEARS
+        ).includes(yearNumber)
+      ) {
+        throw new ApiError(
+          400,
+          "Invalid academic year filter"
+        );
+      }
+
+      /*
+        Students store a single year while teachers
+        store a list of assigned years.
+      */
+      andConditions.push({
+        $or: [
+          { year: yearNumber },
+          { teachingYears: yearNumber },
+        ],
+      });
+    }
+
     const trimmedSearch = String(search).trim();
 
     if (trimmedSearch) {
       const escapedSearch =
         escapeRegex(trimmedSearch);
 
-      filter.$or = [
-        {
-          name: {
-            $regex: escapedSearch,
-            $options: "i",
+      andConditions.push({
+        $or: [
+          {
+            name: {
+              $regex: escapedSearch,
+              $options: "i",
+            },
           },
-        },
-        {
-          email: {
-            $regex: escapedSearch,
-            $options: "i",
+          {
+            email: {
+              $regex: escapedSearch,
+              $options: "i",
+            },
           },
-        },
-      ];
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
 
     const pageNumber = Math.max(
@@ -391,6 +513,10 @@ export const getAllUsers = asyncHandler(
     const [users, totalUsers] =
       await Promise.all([
         User.find(filter)
+          .populate(
+            "department",
+            "name code isActive"
+          )
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNumber)
@@ -424,11 +550,79 @@ export const getAllUsers = asyncHandler(
         filter: {
           type,
           search: trimmedSearch,
+          role: role || null,
+          department: department || null,
+          year: year ? Number(year) : null,
         },
       },
     });
   }
 );
+
+/**
+ * POST /api/v1/admin/users
+ *
+ * Create a student, teacher or admin account directly.
+ *
+ * Admin-created accounts skip email verification, profile
+ * onboarding and teacher approval, and must replace their
+ * temporary password on first login.
+ */
+export const createAdminUser = asyncHandler(
+  async (req, res) => {
+    assertNoServerControlledFields(req.body);
+
+    const user = await createUserAsAdmin(
+      req.user,
+      req.body
+    );
+
+    const created = await User.findById(user._id)
+      .populate(
+        "department",
+        "name code isActive"
+      )
+      .lean();
+
+    return res.status(201).json({
+      success: true,
+      message: `${user.role
+        .charAt(0)
+        .toUpperCase()}${user.role.slice(
+        1
+      )} account created successfully`,
+      data: {
+        user: getPublicUser(created),
+      },
+    });
+  }
+);
+
+/**
+ * PATCH /api/v1/admin/users/:id/reset-password
+ *
+ * Assign a new temporary password and require the user
+ * to change it on their next login.
+ */
+export const resetAdminUserPassword =
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const user = await resetUserPasswordAsAdmin(
+      req.user,
+      id,
+      req.body.temporaryPassword
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Temporary password assigned. The user must change it at next login.",
+      data: {
+        user: getPublicUser(user),
+      },
+    });
+  });
 
 /**
  * GET /api/v1/admin/users/:id
@@ -441,7 +635,12 @@ export const getAdminUserById = asyncHandler(
 
     ensureValidObjectId(id);
 
-    const user = await User.findById(id).lean();
+    const user = await User.findById(id)
+      .populate(
+        "department",
+        "name code isActive"
+      )
+      .lean();
 
     if (!user) {
       throw new ApiError(404, "User not found");
@@ -468,6 +667,8 @@ export const updateAdminUser = asyncHandler(
 
     ensureValidObjectId(id);
 
+    assertNoServerControlledFields(req.body);
+
     const {
       name,
       email,
@@ -475,7 +676,7 @@ export const updateAdminUser = asyncHandler(
       department,
       year,
       teachingYears,
-      profileCompleted,
+      isActive,
     } = req.body;
 
     const user = await User.findById(id);
@@ -595,10 +796,13 @@ export const updateAdminUser = asyncHandler(
         /**
          * Do not lock the currently logged-in
          * admin out after changing their email.
+         *
+         * Admin-provisioned accounts stay verified because
+         * the administrator supplies the address directly and
+         * those accounts never use the verification flow.
          */
-        if (isEditingSelf) {
+        if (isEditingSelf || user.createdBy) {
           user.isEmailVerified = true;
-          user.isActive = true;
         } else {
           user.isEmailVerified = false;
           user.isActive = false;
@@ -676,33 +880,10 @@ export const updateAdminUser = asyncHandler(
 
     /**
      * Update department.
+     *
+     * Only active departments may be assigned.
      */
     if (department !== undefined) {
-      if (
-        department !== null &&
-        department !== "" &&
-        !mongoose.isValidObjectId(department)
-      ) {
-        throw new ApiError(
-          400,
-          "Invalid department"
-        );
-      }
-
-      if (department) {
-        const departmentExists =
-          await Department.exists({
-            _id: department,
-          });
-
-        if (!departmentExists) {
-          throw new ApiError(
-            400,
-            "Department not found"
-          );
-        }
-      }
-
       if (
         user.role === USER_ROLES.ADMIN &&
         department
@@ -711,6 +892,10 @@ export const updateAdminUser = asyncHandler(
           400,
           "Admin users cannot have a department"
         );
+      }
+
+      if (department) {
+        await getActiveDepartment(department);
       }
 
       user.department =
@@ -722,40 +907,7 @@ export const updateAdminUser = asyncHandler(
      */
     if (year !== undefined) {
       const normalizedYear =
-        year === null || year === ""
-          ? null
-          : Number(year);
-
-      if (
-        normalizedYear !== null &&
-        !Object.values(
-          ACADEMIC_YEARS
-        ).includes(normalizedYear)
-      ) {
-        throw new ApiError(
-          400,
-          "Invalid academic year"
-        );
-      }
-
-
-      if (
-        normalizedYear !== null &&
-        user.department
-      ) {
-        const academicYearExists =
-          await AcademicYear.exists({
-            department: user.department,
-            yearNumber: normalizedYear,
-          });
-
-        if (!academicYearExists) {
-          throw new ApiError(
-            400,
-            "Academic year is not available for the selected department"
-          );
-        }
-      }
+        year === null ? null : Number(year);
 
       if (
         user.role !== USER_ROLES.STUDENT &&
@@ -771,59 +923,16 @@ export const updateAdminUser = asyncHandler(
     }
 
     /**
-     * Update teacher teaching years.
+     * Update teacher assigned academic years.
      */
     if (teachingYears !== undefined) {
-      if (!Array.isArray(teachingYears)) {
-        throw new ApiError(
-          400,
-          "Teaching years must be an array"
-        );
-      }
-
       const normalizedYears = [
         ...new Set(
           teachingYears.map(Number)
         ),
-      ];
-
-      const hasInvalidYear =
-        normalizedYears.some(
-          (teachingYear) =>
-            !Object.values(
-              ACADEMIC_YEARS
-            ).includes(teachingYear)
-        );
-
-      if (hasInvalidYear) {
-        throw new ApiError(
-          400,
-          "One or more teaching years are invalid"
-        );
-      }
-
-      if (
-        normalizedYears.length > 0 &&
-        user.department
-      ) {
-        const matchingYearCount =
-          await AcademicYear.countDocuments({
-            department: user.department,
-            yearNumber: {
-              $in: normalizedYears,
-            },
-          });
-
-        if (
-          matchingYearCount !==
-          normalizedYears.length
-        ) {
-          throw new ApiError(
-            400,
-            "One or more teaching years are unavailable for the selected department"
-          );
-        }
-      }
+      ].sort(
+        (first, second) => first - second
+      );
 
       if (
         user.role !== USER_ROLES.TEACHER &&
@@ -831,7 +940,7 @@ export const updateAdminUser = asyncHandler(
       ) {
         throw new ApiError(
           400,
-          "Only teachers can have teaching years"
+          "Only teachers can have assigned academic years"
         );
       }
 
@@ -840,20 +949,36 @@ export const updateAdminUser = asyncHandler(
     }
 
     /**
-     * Update profile completion.
+     * Update account status.
      */
-    if (profileCompleted !== undefined) {
-      if (
-        typeof profileCompleted !== "boolean"
-      ) {
+    if (isActive !== undefined) {
+      if (isEditingSelf && !isActive) {
         throw new ApiError(
           400,
-          "profileCompleted must be true or false"
+          "You cannot deactivate your own account"
         );
       }
 
-      user.profileCompleted =
-        profileCompleted;
+      if (
+        !isActive &&
+        user.role === USER_ROLES.ADMIN &&
+        user.isActive &&
+        (await countActiveAdmins(user._id)) === 0
+      ) {
+        throw new ApiError(
+          400,
+          "The final active platform administrator cannot be deactivated"
+        );
+      }
+
+      if (isActive && !user.isEmailVerified) {
+        throw new ApiError(
+          400,
+          "User must verify their email before activation"
+        );
+      }
+
+      user.isActive = isActive;
     }
 
     /**
@@ -896,13 +1021,90 @@ export const updateAdminUser = asyncHandler(
       user.teacherRejectionReason = null;
     }
 
+    /**
+     * Revalidate every department and academic-year
+     * relationship after the updates are applied so no
+     * invalid assignment is left behind.
+     */
+    if (user.department) {
+      await getActiveDepartment(user.department);
+    }
+
+    if (user.role === USER_ROLES.STUDENT) {
+      if (user.year !== null) {
+        if (!user.department) {
+          throw new ApiError(
+            400,
+            "A department is required before an academic year can be assigned"
+          );
+        }
+
+        await assertActiveAcademicYears(
+          user.department,
+          [user.year]
+        );
+      }
+    }
+
+    if (user.role === USER_ROLES.TEACHER) {
+      if (user.teachingYears.length > 0) {
+        if (!user.department) {
+          throw new ApiError(
+            400,
+            "A department is required before assigned academic years can be set"
+          );
+        }
+
+        await assertActiveAcademicYears(
+          user.department,
+          user.teachingYears
+        );
+      }
+    }
+
+    /**
+     * Admin-provisioned accounts never use the onboarding
+     * flow, so profile completion tracks whether the
+     * required profile fields are present.
+     */
+    if (user.createdBy) {
+      if (user.role === USER_ROLES.STUDENT) {
+        user.profileCompleted = Boolean(
+          user.department && user.year
+        );
+      } else if (
+        user.role === USER_ROLES.TEACHER
+      ) {
+        user.profileCompleted = Boolean(
+          user.department &&
+            user.teachingYears.length > 0
+        );
+
+        user.teacherApprovalStatus =
+          TEACHER_APPROVAL_STATUSES.APPROVED;
+
+        user.teacherApprovedAt =
+          user.teacherApprovedAt || new Date();
+
+        user.teacherApprovedBy =
+          user.teacherApprovedBy || req.user._id;
+      }
+    }
+
     await user.save();
+
+    const updated = await User.findById(user._id)
+      .populate(
+        "department",
+        "name code isActive"
+      )
+      .lean();
 
     return res.status(200).json({
       success: true,
       message: "User updated successfully",
       data: {
-        user: getPublicUser(user),
+        user: getPublicUser(updated),
       },
     });
   }
@@ -944,6 +1146,18 @@ export const updateUserStatus = asyncHandler(
       throw new ApiError(
         400,
         "You cannot deactivate your own account"
+      );
+    }
+
+    if (
+      isActive === false &&
+      user.role === USER_ROLES.ADMIN &&
+      user.isActive &&
+      (await countActiveAdmins(user._id)) === 0
+    ) {
+      throw new ApiError(
+        400,
+        "The final active platform administrator cannot be deactivated"
       );
     }
 
@@ -1011,22 +1225,10 @@ export const deleteUserPermanently =
       );
     }
 
-    if (
-      id === req.user._id.toString()
-    ) {
-      throw new ApiError(
-        400,
-        "You cannot permanently delete your own admin account"
-      );
-    }
-
-    const user = await User.findById(id);
-
-    if (!user) {
-      throw new ApiError(404, "User not found");
-    }
-
-    await user.deleteOne();
+    const user = await deleteUserAsAdmin(
+      req.user,
+      id
+    );
 
     return res.status(200).json({
       success: true,
@@ -1048,6 +1250,7 @@ export const getAdminDashboard =
       totalUsers,
       totalStudents,
       totalTeachers,
+      totalAdmins,
       pendingTeachers,
       activeUsers,
       inactiveUsers,
@@ -1060,6 +1263,10 @@ export const getAdminDashboard =
 
       User.countDocuments({
         role: USER_ROLES.TEACHER,
+      }),
+
+      User.countDocuments({
+        role: USER_ROLES.ADMIN,
       }),
 
       User.countDocuments({
@@ -1088,6 +1295,7 @@ export const getAdminDashboard =
           totalUsers,
           totalStudents,
           totalTeachers,
+          totalAdmins,
           pendingTeachers,
           activeUsers,
           inactiveUsers,

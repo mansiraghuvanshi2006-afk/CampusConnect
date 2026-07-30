@@ -423,6 +423,36 @@ const AdminDashboard = () => {
                   </span>
                 </div>
               </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/admin/chat")
+                }
+                className="group rounded-2xl border border-white/10 bg-[#2b2d31] p-6 text-left transition hover:-translate-y-1 hover:border-white/20 hover:bg-[#32343a]"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-sky-300">
+                      Groups
+                    </p>
+
+                    <h3 className="mt-2 text-xl font-bold text-white">
+                      Manage Groups
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-[#b5bac1]">
+                      Create campus groups, pick members
+                      by department and year, and manage
+                      group admins.
+                    </p>
+                  </div>
+
+                  <span className="text-2xl text-sky-300 transition group-hover:translate-x-1">
+                    →
+                  </span>
+                </div>
+              </button>
             </div>
           </section>
 

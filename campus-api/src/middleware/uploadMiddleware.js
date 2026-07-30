@@ -17,8 +17,14 @@ export const UPLOAD_ROOT = path.resolve(
 
 export const CHAT_UPLOAD_DIR = path.join(UPLOAD_ROOT, "chat");
 
+export const GROUP_IMAGE_UPLOAD_DIR = path.join(
+  UPLOAD_ROOT,
+  "groups"
+);
+
 const ensureDirs = () => {
   fs.mkdirSync(CHAT_UPLOAD_DIR, { recursive: true });
+  fs.mkdirSync(GROUP_IMAGE_UPLOAD_DIR, { recursive: true });
 };
 
 ensureDirs();
@@ -129,3 +135,84 @@ export const buildPublicUploadUrl = (fileName) =>
 
 export const toAbsoluteUploadPath = (fileName) =>
   path.join(CHAT_UPLOAD_DIR, fileName);
+
+export const GROUP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+const GROUP_IMAGE_MIME_TYPES = Object.freeze([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+const groupImageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    ensureDirs();
+    cb(null, GROUP_IMAGE_UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const ext =
+      ALLOWED_MIME_TYPES[file.mimetype]?.ext ||
+      path.extname(file.originalname).toLowerCase() ||
+      ".jpg";
+
+    cb(null, `${Date.now()}-${randomUUID()}${ext}`);
+  },
+});
+
+/**
+ * Group images reuse the chat upload pipeline but only accept
+ * images and enforce a smaller size limit.
+ */
+export const groupImageUpload = multer({
+  storage: groupImageStorage,
+  fileFilter: (_req, file, cb) => {
+    if (!GROUP_IMAGE_MIME_TYPES.includes(file.mimetype)) {
+      cb(
+        new ApiError(
+          400,
+          "Group images must be a JPG, PNG, WEBP or GIF file"
+        )
+      );
+      return;
+    }
+
+    cb(null, true);
+  },
+  limits: {
+    fileSize: GROUP_IMAGE_MAX_BYTES,
+    files: 1,
+  },
+});
+
+export const buildGroupImageUrl = (fileName) =>
+  `/uploads/groups/${fileName}`;
+
+/**
+ * Delete a previously uploaded group image.
+ *
+ * Only files inside the group upload directory are removed, so a
+ * crafted URL cannot reach anything else on disk.
+ */
+export const removeGroupImageFile = (imageUrl) => {
+  if (
+    typeof imageUrl !== "string" ||
+    !imageUrl.startsWith("/uploads/groups/")
+  ) {
+    return;
+  }
+
+  const fileName = path.basename(imageUrl);
+  const absolutePath = path.join(
+    GROUP_IMAGE_UPLOAD_DIR,
+    fileName
+  );
+
+  if (!absolutePath.startsWith(GROUP_IMAGE_UPLOAD_DIR)) {
+    return;
+  }
+
+  fs.promises.unlink(absolutePath).catch(() => {
+    // A missing file is not an error for the caller.
+  });
+};

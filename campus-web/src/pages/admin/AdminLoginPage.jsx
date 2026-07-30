@@ -59,6 +59,17 @@ const AdminLoginPage = () => {
         return;
       }
 
+      // Admin-created accounts must set their own password first.
+      if (user.mustChangePassword) {
+        toast.success("Please set a new password to continue");
+
+        navigate("/change-password", {
+          replace: true,
+        });
+
+        return;
+      }
+
       toast.success(`Welcome, ${user.name}`);
 
       navigate("/admin", {

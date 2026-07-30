@@ -41,6 +41,9 @@ const errorHandler = (error, req, res, next) => {
       statusCode === 500 && process.env.NODE_ENV === "production"
         ? "Internal server error"
         : error.message || "Internal server error",
+    ...(typeof error.code === "string" && {
+      code: error.code,
+    }),
     ...(error.details && { errors: error.details }),
     ...(process.env.NODE_ENV !== "production" && {
       stack: error.stack,

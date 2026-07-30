@@ -90,6 +90,13 @@ const seedAdmin = async () => {
         null;
 
       /*
+        The seeded root admin owns its password through the
+        .env file, so it never has to change it on login.
+      */
+      existingAccount.mustChangePassword =
+        false;
+
+      /*
         Update the admin password using ADMIN_PASSWORD
         from the .env file. The User model will hash it
         automatically before saving.

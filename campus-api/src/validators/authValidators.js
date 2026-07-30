@@ -137,6 +137,65 @@ export const resendVerificationSchema = z
   .strict();
 
 /**
+ * PATCH /api/v1/auth/change-temporary-password
+ *
+ * Used by admin-created accounts on first login.
+ */
+export const changeTemporaryPasswordSchema = z
+  .object({
+    currentPassword: z
+      .string({
+        required_error:
+          "Current password is required",
+        invalid_type_error:
+          "Current password must be a string",
+      })
+      .min(
+        1,
+        "Current password is required"
+      )
+      .max(
+        128,
+        "Current password cannot exceed 128 characters"
+      ),
+
+    newPassword: passwordSchema,
+
+    confirmPassword: z
+      .string({
+        required_error:
+          "Password confirmation is required",
+        invalid_type_error:
+          "Password confirmation must be a string",
+      })
+      .min(
+        1,
+        "Password confirmation is required"
+      ),
+  })
+  .strict()
+  .refine(
+    (data) =>
+      data.newPassword ===
+      data.confirmPassword,
+    {
+      message:
+        "New password and confirmation do not match",
+      path: ["confirmPassword"],
+    }
+  )
+  .refine(
+    (data) =>
+      data.newPassword !==
+      data.currentPassword,
+    {
+      message:
+        "The new password must be different from your temporary password",
+      path: ["newPassword"],
+    }
+  );
+
+/**
  * DELETE /api/v1/auth/sessions/:sessionId
  */
 export const sessionIdParamsSchema = z

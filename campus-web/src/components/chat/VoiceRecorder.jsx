@@ -8,7 +8,12 @@ import {
   FiX,
 } from "react-icons/fi";
 
-const VoiceRecorder = ({ onSend, onCancel, disabled }) => {
+const VoiceRecorder = ({
+  onSend,
+  onCancel,
+  disabled,
+  onRecordingChange,
+}) => {
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -20,6 +25,10 @@ const VoiceRecorder = ({ onSend, onCancel, disabled }) => {
   const streamRef = useRef(null);
   const analyserRef = useRef(null);
   const rafRef = useRef(null);
+
+  useEffect(() => {
+    onRecordingChange?.(recording);
+  }, [recording, onRecordingChange]);
 
   useEffect(() => {
     return () => {

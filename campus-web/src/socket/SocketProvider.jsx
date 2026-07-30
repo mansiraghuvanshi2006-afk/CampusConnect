@@ -31,6 +31,14 @@ const canUserUseChat = (user) => {
     return false;
   }
 
+  /*
+    The server refuses socket connections until a temporary
+    password has been replaced.
+  */
+  if (user.mustChangePassword) {
+    return false;
+  }
+
   if (user.role === "admin") {
     return true;
   }

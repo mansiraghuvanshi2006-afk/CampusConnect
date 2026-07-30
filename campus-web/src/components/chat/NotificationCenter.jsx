@@ -19,6 +19,37 @@ const NotificationCenter = ({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      setLoading(true);
+
+      try {
+        const result = await listNotifications({ limit: 30 });
+
+        if (cancelled) {
+          return;
+        }
+
+        setItems(result.notifications || []);
+        setUnreadCount?.(result.unreadCount || 0);
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setUnreadCount]);
+
   const load = async () => {
     setLoading(true);
 
@@ -32,10 +63,6 @@ const NotificationCenter = ({
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    load();
-  }, []);
 
   useEffect(() => {
     if (!socket) {

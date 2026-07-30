@@ -231,6 +231,34 @@ const userSchema =
         default: false,
       },
 
+      /*
+        Set to true for accounts provisioned by
+        an administrator with a temporary password.
+
+        Self-registered users keep false.
+      */
+      mustChangePassword: {
+        type: Boolean,
+        default: false,
+      },
+
+      passwordChangedAt: {
+        type: Date,
+        default: null,
+      },
+
+      /*
+        Administrator who provisioned this account.
+        Null for self-registered users.
+      */
+      createdBy: {
+        type:
+          mongoose.Schema.Types
+            .ObjectId,
+        ref: "User",
+        default: null,
+      },
+
       lastLoginAt: {
         type: Date,
         default: null,
@@ -252,6 +280,21 @@ const userSchema =
   );
 
 /*
+  Admin-provisioned accounts skip the
+  self-registration state reset below because the
+  administrator supplies verification, approval and
+  profile values that the server has already validated.
+
+  Set with:
+  user.$locals.adminProvisioned = true
+*/
+export const markAdminProvisioned = (user) => {
+  user.$locals.adminProvisioned = true;
+
+  return user;
+};
+
+/*
   Set the initial account state
   based on the selected role.
 */
@@ -259,6 +302,10 @@ userSchema.pre(
   "validate",
   function () {
     if (!this.isNew) {
+      return;
+    }
+
+    if (this.$locals.adminProvisioned) {
       return;
     }
 
@@ -372,6 +419,9 @@ userSchema.pre(
         this.password,
         saltRounds
       );
+
+    this.passwordChangedAt =
+      new Date();
   }
 );
 

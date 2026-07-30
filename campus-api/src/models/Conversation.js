@@ -12,6 +12,18 @@ export const CONVERSATION_MEMBER_ROLES = Object.freeze({
   ADMIN: "admin",
 });
 
+/**
+ * Scope classification for group conversations.
+ *
+ * This describes how the member list was chosen and is
+ * independent of `type`, which controls posting rules.
+ */
+export const GROUP_TYPES = Object.freeze({
+  DEPARTMENT: "department",
+  ACADEMIC_YEAR: "academic-year",
+  CUSTOM: "custom",
+});
+
 const conversationMemberSchema = new mongoose.Schema(
   {
     user: {
@@ -65,6 +77,24 @@ const conversationMemberSchema = new mongoose.Schema(
     isPinned: {
       type: Boolean,
       default: false,
+    },
+
+    /**
+     * Per-member "clear chat for me" watermark.
+     * Messages at or before this timestamp are hidden for this member only.
+     */
+    clearedAt: {
+      type: Date,
+      default: null,
+    },
+
+    /**
+     * Per-member hide/"delete chat for me" timestamp.
+     * Conversation reappears in the list when a newer message arrives.
+     */
+    hiddenAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -124,6 +154,29 @@ const conversationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: [true, "Conversation creator is required"],
+    },
+
+    /*
+      Single accountable group owner.
+
+      The owner is always an active group admin and cannot be
+      removed or demoted while they hold ownership.
+
+      Null for direct conversations.
+    */
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    groupType: {
+      type: String,
+      enum: {
+        values: Object.values(GROUP_TYPES),
+        message: "Invalid group type",
+      },
+      default: GROUP_TYPES.CUSTOM,
     },
 
     department: {
@@ -200,6 +253,52 @@ conversationSchema.pre("validate", function () {
       "Group conversations must have a name"
     );
   }
+
+  if (!this.isActive) {
+    return;
+  }
+
+  /*
+    An active group must keep an owner who is also an active
+    group administrator.
+
+    Ownership is repaired here rather than rejected so that
+    groups created before ownership tracking existed keep
+    working. The preferred owner is the current owner, then the
+    creator, then any active group admin, then any member.
+  */
+  const activeMembers = (this.members || []).filter(
+    (member) => member.isActive
+  );
+
+  if (activeMembers.length === 0) {
+    this.invalidate(
+      "members",
+      "An active group must have at least one active member"
+    );
+
+    return;
+  }
+
+  const findActiveMember = (userId) =>
+    userId
+      ? activeMembers.find(
+          (member) =>
+            member.user.toString() === userId.toString()
+        )
+      : undefined;
+
+  const ownerMembership =
+    findActiveMember(this.owner) ||
+    findActiveMember(this.createdBy) ||
+    activeMembers.find(
+      (member) =>
+        member.role === CONVERSATION_MEMBER_ROLES.ADMIN
+    ) ||
+    activeMembers[0];
+
+  this.owner = ownerMembership.user;
+  ownerMembership.role = CONVERSATION_MEMBER_ROLES.ADMIN;
 });
 
 conversationSchema.index(
@@ -228,6 +327,22 @@ conversationSchema.index({
 conversationSchema.index({
   department: 1,
   type: 1,
+  isActive: 1,
+});
+
+conversationSchema.index({
+  owner: 1,
+  isActive: 1,
+});
+
+conversationSchema.index({
+  department: 1,
+  academicYears: 1,
+  isActive: 1,
+});
+
+conversationSchema.index({
+  createdBy: 1,
   isActive: 1,
 });
 

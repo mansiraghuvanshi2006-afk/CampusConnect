@@ -75,6 +75,29 @@ export const getCurrentUser = async () => {
   return response.data.data.user;
 };
 
+/**
+ * Replace the temporary password assigned by an administrator.
+ *
+ * The current session stays valid, so the caller only needs to
+ * refresh the stored user state afterwards.
+ */
+export const changeTemporaryPassword = async ({
+  currentPassword,
+  newPassword,
+  confirmPassword,
+}) => {
+  const response = await api.patch(
+    "/auth/change-temporary-password",
+    {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    }
+  );
+
+  return response.data?.data?.user;
+};
+
 export const logoutUser = async () => {
   try {
     const response = await api.post(

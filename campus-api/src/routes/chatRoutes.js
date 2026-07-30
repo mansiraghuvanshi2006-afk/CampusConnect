@@ -1,10 +1,12 @@
 import express from "express";
 
 import authenticate from "../middleware/authenticate.js";
+import requirePasswordChange from "../middleware/requirePasswordChange.js";
 import validateRequest from "../middleware/validateRequest.js";
 import validateParams from "../middleware/validateParams.js";
 import {
   chatUpload,
+  groupImageUpload,
 } from "../middleware/uploadMiddleware.js";
 
 import {
@@ -34,6 +36,9 @@ import {
   getConversation,
   updateConversation,
   deleteConversation,
+  clearConversationForMe,
+  hideConversationForMe,
+  leaveConversation,
   getMessages,
   sendMessage,
   addMembers,
@@ -41,6 +46,17 @@ import {
   markConversationRead,
   pinConversation,
 } from "../controllers/chatController.js";
+
+import {
+  getGroupScopeOptions,
+  getGroupMemberOptions,
+  getGroups,
+  getGroupMembers,
+  promoteGroupMember,
+  demoteGroupMember,
+  transferGroupOwnership,
+  uploadGroupImage,
+} from "../controllers/groupController.js";
 
 import {
   editMessage,
@@ -59,6 +75,8 @@ import {
   startCall,
   getActiveCall,
   getCall,
+  listCalls,
+  listConversationCalls,
   acceptCall,
   rejectCall,
   endCall,
@@ -66,7 +84,7 @@ import {
 
 const router = express.Router();
 
-router.use(authenticate);
+router.use(authenticate, requirePasswordChange);
 
 /**
  * GET /api/v1/chat/eligible-users
@@ -86,6 +104,19 @@ router.patch(
   "/notifications/:notificationId/read",
   validateParams(notificationIdParamsSchema),
   markNotificationRead
+);
+
+/**
+ * Group creation helpers
+ */
+router.get("/group-scope-options", getGroupScopeOptions);
+router.get("/group-member-options", getGroupMemberOptions);
+router.get("/groups", getGroups);
+
+router.post(
+  "/group-image",
+  groupImageUpload.single("image"),
+  uploadGroupImage
 );
 
 /**
@@ -135,11 +166,42 @@ router.patch(
 
 /**
  * DELETE /api/v1/chat/conversations/:conversationId
+ * Soft-delete/deactivate a group (managers or site admin).
  */
 router.delete(
   "/conversations/:conversationId",
   validateParams(conversationIdParamsSchema),
   deleteConversation
+);
+
+/**
+ * POST /api/v1/chat/conversations/:conversationId/clear
+ * Clear chat history for the current user only.
+ */
+router.post(
+  "/conversations/:conversationId/clear",
+  validateParams(conversationIdParamsSchema),
+  clearConversationForMe
+);
+
+/**
+ * DELETE /api/v1/chat/conversations/:conversationId/for-me
+ * Hide a direct conversation from the current user's list.
+ */
+router.delete(
+  "/conversations/:conversationId/for-me",
+  validateParams(conversationIdParamsSchema),
+  hideConversationForMe
+);
+
+/**
+ * POST /api/v1/chat/conversations/:conversationId/leave
+ * Leave a group conversation.
+ */
+router.post(
+  "/conversations/:conversationId/leave",
+  validateParams(conversationIdParamsSchema),
+  leaveConversation
 );
 
 /**
@@ -192,11 +254,19 @@ router.get(
 /**
  * Calls
  */
+router.get("/calls", listCalls);
+
 router.post(
   "/conversations/:conversationId/calls",
   validateParams(conversationIdParamsSchema),
   validateRequest(startCallSchema),
   startCall
+);
+
+router.get(
+  "/conversations/:conversationId/calls",
+  validateParams(conversationIdParamsSchema),
+  listConversationCalls
 );
 
 router.get(
@@ -283,12 +353,42 @@ router.post(
 );
 
 /**
+ * GET /api/v1/chat/conversations/:conversationId/members
+ */
+router.get(
+  "/conversations/:conversationId/members",
+  validateParams(conversationIdParamsSchema),
+  getGroupMembers
+);
+
+/**
  * DELETE /api/v1/chat/conversations/:conversationId/members/:userId
  */
 router.delete(
   "/conversations/:conversationId/members/:userId",
   validateParams(memberParamsSchema),
   removeMember
+);
+
+/**
+ * Group admin role management
+ */
+router.patch(
+  "/conversations/:conversationId/admins/:userId/promote",
+  validateParams(memberParamsSchema),
+  promoteGroupMember
+);
+
+router.patch(
+  "/conversations/:conversationId/admins/:userId/demote",
+  validateParams(memberParamsSchema),
+  demoteGroupMember
+);
+
+router.patch(
+  "/conversations/:conversationId/owner/:userId",
+  validateParams(memberParamsSchema),
+  transferGroupOwnership
 );
 
 /**

@@ -1,6 +1,7 @@
 import express from "express";
 
 import {
+  changeTemporaryPassword,
   getActiveSessions,
   getCurrentUser,
   login,
@@ -18,6 +19,7 @@ import validateParams from "../middleware/validateParams.js";
 import validateRequest from "../middleware/validateRequest.js";
 
 import {
+  changeTemporaryPasswordSchema,
   loginSchema,
   registerSchema,
   resendVerificationSchema,
@@ -73,6 +75,19 @@ router.get(
   "/me",
   authenticate,
   getCurrentUser
+);
+
+/**
+ * Required first-login password change.
+ *
+ * This route stays reachable while `mustChangePassword`
+ * is true, otherwise the user could never clear it.
+ */
+router.patch(
+  "/change-temporary-password",
+  authenticate,
+  validateRequest(changeTemporaryPasswordSchema),
+  changeTemporaryPassword
 );
 
 router.get(

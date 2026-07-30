@@ -7,7 +7,7 @@ export const isTransactionUnsupportedError = (error) => {
   const codeName = String(error?.codeName || "");
 
   return (
-    /Transaction numbers|replica set member|mongos|not supported|IllegalOperation/i.test(
+    /Transaction numbers|replica set member|mongos|not supported|IllegalOperation|retryable writes/i.test(
       message
     ) ||
     /TransactionNumbers|IllegalOperation/i.test(codeName) ||

@@ -5,8 +5,12 @@ import Conversation, {
 } from "../models/Conversation.js";
 
 import Message, { MESSAGE_TYPES } from "../models/Message.js";
-import User from "../models/User.js";
+import User, { USER_ROLES } from "../models/User.js";
 import ApiError from "../utils/ApiError.js";
+
+import { resolveGroupScope } from "./groupService.js";
+
+import { removeGroupImageFile } from "../middleware/uploadMiddleware.js";
 
 import {
   assertCanUseChat,
@@ -15,8 +19,11 @@ import {
   assertCanViewConversation,
   assertCanSendMessage,
   assertCanManageConversation,
+  assertCanEditGroup,
+  assertCanDeleteGroup,
   assertCanAddMember,
   assertCanRemoveMember,
+  assertCanLeaveConversation,
   getActiveMembership,
   getConversationPermissions,
   getEligibleChatUsers,
@@ -104,17 +111,37 @@ export const listConversations = async (
     .sort({ lastMessageAt: -1, createdAt: -1 })
     .lean();
 
-  const formatted = conversations.map((conversation) => {
-    const permissions = getConversationPermissions(
-      currentUser,
-      conversation
-    );
+  const formatted = conversations
+    .filter((conversation) => {
+      const membership = getActiveMembership(
+        conversation,
+        currentUser._id
+      );
 
-    return formatConversation(conversation, currentUser, {
-      onlineUserIds,
-      permissions,
+      if (!membership?.hiddenAt) {
+        return true;
+      }
+
+      if (!conversation.lastMessageAt) {
+        return false;
+      }
+
+      return (
+        new Date(conversation.lastMessageAt).getTime() >
+        new Date(membership.hiddenAt).getTime()
+      );
+    })
+    .map((conversation) => {
+      const permissions = getConversationPermissions(
+        currentUser,
+        conversation
+      );
+
+      return formatConversation(conversation, currentUser, {
+        onlineUserIds,
+        permissions,
+      });
     });
-  });
 
   formatted.sort((a, b) => {
     if (a.isPinned !== b.isPinned) {
@@ -261,18 +288,14 @@ export const createGroupConversation = async (
 
   assertCanCreateGroup(currentUser, type);
 
-  if (currentUser.role === "teacher") {
-    const requestedYears = payload.academicYears || [];
-
-    for (const year of requestedYears) {
-      if (!currentUser.teachingYears.includes(year)) {
-        throw new ApiError(
-          403,
-          "You can only create groups for your assigned academic years"
-        );
-      }
-    }
-  }
+  /*
+    Department and academic years are revalidated here: the
+    frontend selection is never trusted.
+  */
+  const scope = await resolveGroupScope(currentUser, {
+    department: payload.department,
+    academicYears: payload.academicYears,
+  });
 
   const memberIds = [
     ...new Set(
@@ -298,11 +321,16 @@ export const createGroupConversation = async (
 
   const draftConversation = {
     type,
-    academicYears: payload.academicYears || [],
-    department:
-      currentUser.role === "teacher"
-        ? currentUser.department
-        : payload.department || null,
+    academicYears: scope.academicYears,
+    department: scope.department,
+    isActive: true,
+    members: [
+      {
+        user: currentUser._id,
+        role: CONVERSATION_MEMBER_ROLES.ADMIN,
+        isActive: true,
+      },
+    ],
   };
 
   for (const memberId of memberIds) {
@@ -319,22 +347,24 @@ export const createGroupConversation = async (
     assertCanAddMember(
       currentUser,
       targetUser,
-      {
-        ...draftConversation,
-        isActive: true,
-        members: [
-          {
-            user: currentUser._id,
-            role: CONVERSATION_MEMBER_ROLES.ADMIN,
-            isActive: true,
-          },
-        ],
-      }
+      draftConversation
     );
+
+    const shouldBeGroupAdmin = adminIds.has(memberId);
+
+    if (
+      shouldBeGroupAdmin &&
+      targetUser.role === USER_ROLES.STUDENT
+    ) {
+      throw new ApiError(
+        403,
+        "Students cannot be group administrators"
+      );
+    }
 
     members.push({
       user: targetUser._id,
-      role: adminIds.has(memberId)
+      role: shouldBeGroupAdmin
         ? CONVERSATION_MEMBER_ROLES.ADMIN
         : CONVERSATION_MEMBER_ROLES.MEMBER,
       addedBy: currentUser._id,
@@ -344,57 +374,30 @@ export const createGroupConversation = async (
   let conversation;
   let systemMessage;
 
-  const runCreate = async (session = null) => {
-    const createConversation = session
-      ? () =>
-          Conversation.create(
-            [
-              {
-                type,
-                name: payload.name.trim(),
-                description:
-                  payload.description?.trim() || null,
-                image: payload.image || null,
-                createdBy: currentUser._id,
-                department:
-                  currentUser.role === "teacher"
-                    ? currentUser.department
-                    : payload.department || null,
-                academicYears: payload.academicYears || [],
-                onlyAdminsCanSend: Boolean(
-                  type === CONVERSATION_TYPES.ANNOUNCEMENT
-                    ? payload.onlyAdminsCanSend !== false
-                    : payload.onlyAdminsCanSend
-                ),
-                members,
-              },
-            ],
-            { session }
-          )
-      : () =>
-          Conversation.create([
-            {
-              type,
-              name: payload.name.trim(),
-              description:
-                payload.description?.trim() || null,
-              image: payload.image || null,
-              createdBy: currentUser._id,
-              department:
-                currentUser.role === "teacher"
-                  ? currentUser.department
-                  : payload.department || null,
-              academicYears: payload.academicYears || [],
-              onlyAdminsCanSend: Boolean(
-                type === CONVERSATION_TYPES.ANNOUNCEMENT
-                  ? payload.onlyAdminsCanSend !== false
-                  : payload.onlyAdminsCanSend
-              ),
-              members,
-            },
-          ]);
+  const conversationDraft = {
+    type,
+    groupType: scope.groupType,
+    name: payload.name.trim(),
+    description: payload.description?.trim() || null,
+    image: payload.image || null,
+    createdBy: currentUser._id,
+    owner: currentUser._id,
+    department: scope.department,
+    academicYears: scope.academicYears,
+    onlyAdminsCanSend: Boolean(
+      type === CONVERSATION_TYPES.ANNOUNCEMENT
+        ? payload.onlyAdminsCanSend !== false
+        : payload.onlyAdminsCanSend
+    ),
+    members,
+  };
 
-    const [createdConversation] = await createConversation();
+  const runCreate = async (session = null) => {
+    const [createdConversation] = session
+      ? await Conversation.create([conversationDraft], {
+          session,
+        })
+      : await Conversation.create([conversationDraft]);
 
     const createSystem = session
       ? () =>
@@ -492,7 +495,7 @@ export const updateConversation = async (
     throw new ApiError(404, "Conversation not found");
   }
 
-  assertCanManageConversation(currentUser, conversation);
+  assertCanEditGroup(currentUser, conversation);
 
   if (payload.name !== undefined) {
     conversation.name = payload.name.trim();
@@ -504,7 +507,13 @@ export const updateConversation = async (
   }
 
   if (payload.image !== undefined) {
+    const previousImage = conversation.image;
+
     conversation.image = payload.image || null;
+
+    if (previousImage && previousImage !== conversation.image) {
+      removeGroupImageFile(previousImage);
+    }
   }
 
   if (payload.onlyAdminsCanSend !== undefined) {
@@ -525,21 +534,17 @@ export const updateConversation = async (
   }
 
   if (payload.academicYears !== undefined) {
-    if (
-      currentUser.role === "teacher" &&
-      Array.isArray(payload.academicYears)
-    ) {
-      for (const year of payload.academicYears) {
-        if (!currentUser.teachingYears.includes(year)) {
-          throw new ApiError(
-            403,
-            "Academic year is outside your assigned years"
-          );
-        }
-      }
-    }
+    /*
+      Years are revalidated against the group's own department so a
+      group can never point at years from another department.
+    */
+    const scope = await resolveGroupScope(currentUser, {
+      department: conversation.department,
+      academicYears: payload.academicYears,
+    });
 
-    conversation.academicYears = payload.academicYears;
+    conversation.academicYears = scope.academicYears;
+    conversation.groupType = scope.groupType;
   }
 
   await conversation.save();
@@ -563,9 +568,264 @@ export const deactivateConversation = async (
   currentUser,
   conversationId
 ) => {
-  return updateConversation(currentUser, conversationId, {
-    isActive: false,
+  assertCanUseChat(currentUser);
+
+  if (!isValidObjectId(conversationId)) {
+    throw new ApiError(400, "Invalid conversation ID");
+  }
+
+  const conversation =
+    await Conversation.findById(conversationId);
+
+  if (!conversation || !conversation.isActive) {
+    throw new ApiError(404, "Conversation not found");
+  }
+
+  if (conversation.type === CONVERSATION_TYPES.DIRECT) {
+    throw new ApiError(
+      400,
+      "Direct conversations cannot be deleted globally. Use delete for me instead."
+    );
+  }
+
+  assertCanDeleteGroup(currentUser, conversation);
+
+  conversation.isActive = false;
+  await conversation.save();
+
+  const populated = await populateConversation(
+    Conversation.findById(conversation._id)
+  ).lean();
+
+  const permissions = getConversationPermissions(
+    currentUser,
+    populated
+  );
+
+  return formatConversation(populated, currentUser, {
+    permissions,
   });
+};
+
+export const clearConversationForMe = async (
+  currentUser,
+  conversationId,
+  onlineUserIds = new Set()
+) => {
+  assertCanUseChat(currentUser);
+
+  if (!isValidObjectId(conversationId)) {
+    throw new ApiError(400, "Invalid conversation ID");
+  }
+
+  const conversation =
+    await Conversation.findById(conversationId);
+
+  if (!conversation) {
+    throw new ApiError(404, "Conversation not found");
+  }
+
+  assertCanViewConversation(currentUser, conversation);
+
+  const membership = getActiveMembership(
+    conversation,
+    currentUser._id
+  );
+
+  membership.clearedAt = new Date();
+  membership.unreadCount = 0;
+  await conversation.save();
+
+  const populated = await populateConversation(
+    Conversation.findById(conversation._id)
+  ).lean();
+
+  const permissions = getConversationPermissions(
+    currentUser,
+    populated
+  );
+
+  return formatConversation(populated, currentUser, {
+    onlineUserIds,
+    permissions,
+  });
+};
+
+export const hideConversationForMe = async (
+  currentUser,
+  conversationId,
+  onlineUserIds = new Set()
+) => {
+  assertCanUseChat(currentUser);
+
+  if (!isValidObjectId(conversationId)) {
+    throw new ApiError(400, "Invalid conversation ID");
+  }
+
+  const conversation =
+    await Conversation.findById(conversationId);
+
+  if (!conversation) {
+    throw new ApiError(404, "Conversation not found");
+  }
+
+  assertCanViewConversation(currentUser, conversation);
+
+  if (conversation.type !== CONVERSATION_TYPES.DIRECT) {
+    throw new ApiError(
+      400,
+      "Delete chat for me is only available for direct conversations. Leave or delete the group instead."
+    );
+  }
+
+  const membership = getActiveMembership(
+    conversation,
+    currentUser._id
+  );
+
+  membership.hiddenAt = new Date();
+  membership.unreadCount = 0;
+  await conversation.save();
+
+  const populated = await populateConversation(
+    Conversation.findById(conversation._id)
+  ).lean();
+
+  const permissions = getConversationPermissions(
+    currentUser,
+    populated
+  );
+
+  return formatConversation(populated, currentUser, {
+    onlineUserIds,
+    permissions,
+  });
+};
+
+export const leaveConversation = async (
+  currentUser,
+  conversationId,
+  onlineUserIds = new Set()
+) => {
+  assertCanUseChat(currentUser);
+
+  if (!isValidObjectId(conversationId)) {
+    throw new ApiError(400, "Invalid conversation ID");
+  }
+
+  const conversation =
+    await Conversation.findById(conversationId);
+
+  if (!conversation) {
+    throw new ApiError(404, "Conversation not found");
+  }
+
+  assertCanLeaveConversation(currentUser, conversation);
+
+  let systemMessage = null;
+
+  await withOptionalTransaction({
+    startSession: () => Conversation.startSession(),
+    work: async (session) => {
+      const fresh = await Conversation.findById(
+        conversationId
+      ).session(session);
+
+      if (!fresh) {
+        throw new ApiError(404, "Conversation not found");
+      }
+
+      assertCanLeaveConversation(currentUser, fresh);
+
+      const membership = getActiveMembership(
+        fresh,
+        currentUser._id
+      );
+
+      if (membership) {
+        membership.isActive = false;
+      }
+
+      const [created] = await Message.create(
+        [
+          {
+            conversation: fresh._id,
+            sender: currentUser._id,
+            type: MESSAGE_TYPES.SYSTEM,
+            text: `${currentUser.name} left the group`,
+          },
+        ],
+        { session }
+      );
+
+      fresh.lastMessage = created._id;
+      fresh.lastMessageAt = created.createdAt;
+      await fresh.save({ session });
+      systemMessage = created;
+    },
+    fallback: async () => {
+      assertCanLeaveConversation(currentUser, conversation);
+
+      const membership = getActiveMembership(
+        conversation,
+        currentUser._id
+      );
+
+      if (membership) {
+        membership.isActive = false;
+      }
+
+      await conversation.save();
+
+      try {
+        systemMessage = await Message.create({
+          conversation: conversation._id,
+          sender: currentUser._id,
+          type: MESSAGE_TYPES.SYSTEM,
+          text: `${currentUser.name} left the group`,
+        });
+
+        conversation.lastMessage = systemMessage._id;
+        conversation.lastMessageAt = systemMessage.createdAt;
+        await conversation.save();
+      } catch (systemError) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            "[chat] leave system message failed after membership save",
+            systemError.message
+          );
+        }
+      }
+    },
+  });
+
+  const populated = await populateConversation(
+    Conversation.findById(conversation._id)
+  ).lean();
+
+  let formattedSystem = null;
+
+  if (systemMessage) {
+    formattedSystem = formatMessage(
+      (
+        await populateMessage(Message.findById(systemMessage._id))
+      ).toObject(),
+      { receipts: [] }
+    );
+  }
+
+  return {
+    conversationId: conversationId.toString(),
+    leftUserId: currentUser._id.toString(),
+    systemMessage: formattedSystem,
+    conversation: formatConversation(populated, currentUser, {
+      onlineUserIds,
+      permissions: getConversationPermissions(
+        currentUser,
+        populated
+      ),
+    }),
+  };
 };
 
 export const getMessages = async (
@@ -584,6 +844,11 @@ export const getMessages = async (
 
   assertCanViewConversation(currentUser, conversation);
 
+  const membership = getActiveMembership(
+    conversation,
+    currentUser._id
+  );
+
   const limit = Math.min(
     50,
     Math.max(1, Number(params.limit) || 30)
@@ -594,6 +859,10 @@ export const getMessages = async (
     isActive: true,
     deletedFor: { $ne: currentUser._id },
   };
+
+  if (membership?.clearedAt) {
+    query.createdAt = { $gt: new Date(membership.clearedAt) };
+  }
 
   if (params.before && isValidObjectId(params.before)) {
     const cursorMessage = await Message.findById(

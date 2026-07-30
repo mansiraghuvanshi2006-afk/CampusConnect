@@ -54,6 +54,9 @@ export const rejectTeacher = async (
 export const getAllUsers = async ({
   type = "all",
   search = "",
+  role = "",
+  department = "",
+  year = "",
   page = 1,
   limit = 20,
 } = {}) => {
@@ -65,11 +68,51 @@ export const getAllUsers = async ({
         search,
         page,
         limit,
+        ...(role ? { role } : {}),
+        ...(department ? { department } : {}),
+        ...(year ? { year } : {}),
       },
     }
   );
 
   return response.data.data;
+};
+
+/**
+ * Create a student, teacher or admin account directly.
+ *
+ * Verification, onboarding, approval and the
+ * temporary-password requirement are all decided
+ * by the backend.
+ */
+export const createAdminUser = async (
+  userData
+) => {
+  const response = await api.post(
+    "/admin/users",
+    userData
+  );
+
+  return response.data;
+};
+
+/**
+ * Assign a new temporary password.
+ *
+ * The user must change it at their next login.
+ */
+export const resetUserPassword = async (
+  userId,
+  temporaryPassword
+) => {
+  const response = await api.patch(
+    `/admin/users/${userId}/reset-password`,
+    {
+      temporaryPassword,
+    }
+  );
+
+  return response.data;
 };
 
 /**

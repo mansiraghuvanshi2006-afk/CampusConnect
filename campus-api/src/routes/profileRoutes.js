@@ -6,6 +6,7 @@ import {
 } from "../controllers/profileController.js";
 
 import authenticate from "../middleware/authenticate.js";
+import requirePasswordChange from "../middleware/requirePasswordChange.js";
 import validateRequest from "../middleware/validateRequest.js";
 
 import {
@@ -16,9 +17,10 @@ import {
 const router = express.Router();
 
 /*
-  Every profile route requires login.
+  Every profile route requires login and a resolved
+  temporary-password change.
 */
-router.use(authenticate);
+router.use(authenticate, requirePasswordChange);
 
 /**
  * Student profile setup

@@ -57,12 +57,14 @@ export const getIceServers = () => {
   return iceServers;
 };
 
-export const formatCall = (call) => {
+export const formatCall = (call, options = {}) => {
   if (!call) {
     return null;
   }
 
-  return {
+  const includeIceServers = options.includeIceServers !== false;
+
+  const formatted = {
     id: toId(call),
     conversationId: toId(call.conversation),
     caller: call.caller
@@ -99,10 +101,15 @@ export const formatCall = (call) => {
     endedBy: toId(call.endedBy),
     duration: call.duration || 0,
     isActive: Boolean(call.isActive),
-    iceServers: getIceServers(),
     createdAt: call.createdAt,
     updatedAt: call.updatedAt,
   };
+
+  if (includeIceServers) {
+    formatted.iceServers = getIceServers();
+  }
+
+  return formatted;
 };
 
 const loadConversation = async (conversationId) => {
@@ -605,10 +612,88 @@ export const getCallById = async (currentUser, callId) => {
     throw new ApiError(404, "Call not found");
   }
 
-  const conversation = await loadConversation(call.conversation);
-  assertCanViewConversation(currentUser, conversation);
+  const isParticipant = (call.participants || []).some(
+    (item) => toId(item.user) === toId(currentUser._id)
+  );
 
-  return formatCall(call);
+  if (!isParticipant) {
+    throw new ApiError(403, "You are not a participant in this call");
+  }
+
+  return formatCall(call, {
+    includeIceServers: Boolean(call.isActive),
+  });
+};
+
+/**
+ * Participant IDs stored on a call document (ObjectId or populated).
+ */
+export const getCallParticipantIds = (call) =>
+  (call?.participants || [])
+    .map((participant) => toId(participant.user))
+    .filter(Boolean);
+
+/**
+ * WebRTC signaling must only relay SDP/ICE between verified
+ * participants of the same active call. Never trust targetUserId
+ * from the client beyond this check.
+ */
+export const assertCallSignalPermission = ({
+  call,
+  actorUserId,
+  targetUserId,
+}) => {
+  if (!call || !call.isActive) {
+    throw new ApiError(404, "Active call not found");
+  }
+
+  if (
+    ![CALL_STATUSES.RINGING, CALL_STATUSES.ACTIVE].includes(
+      call.status
+    )
+  ) {
+    throw new ApiError(
+      400,
+      "Call is not in a state that accepts signaling"
+    );
+  }
+
+  const actorId = toId(actorUserId);
+  const targetId = toId(targetUserId);
+
+  if (!actorId) {
+    throw new ApiError(401, "Authentication required");
+  }
+
+  if (!targetId) {
+    throw new ApiError(400, "targetUserId is required");
+  }
+
+  if (actorId === targetId) {
+    throw new ApiError(400, "Cannot signal yourself");
+  }
+
+  const participantIds = getCallParticipantIds(call);
+
+  if (!participantIds.includes(actorId)) {
+    throw new ApiError(
+      403,
+      "You are not a participant in this call"
+    );
+  }
+
+  if (!participantIds.includes(targetId)) {
+    throw new ApiError(
+      403,
+      "Target user is not a participant in this call"
+    );
+  }
+
+  return {
+    actorId,
+    targetId,
+    participantIds,
+  };
 };
 
 export const assertCallParticipant = async (userId, callId) => {
@@ -627,6 +712,85 @@ export const assertCallParticipant = async (userId, callId) => {
   }
 
   return call;
+};
+
+const MAX_CALL_HISTORY_PAGE = 50;
+
+/**
+ * Calls the authenticated user participated in, newest first.
+ * Never returns SDP/ICE payloads — only safe metadata.
+ */
+export const listCallsForUser = async (currentUser, filters = {}) => {
+  assertCanUseChat(currentUser);
+
+  const page = Math.max(1, Number(filters.page) || 1);
+  const limit = Math.min(
+    MAX_CALL_HISTORY_PAGE,
+    Math.max(1, Number(filters.limit) || 20)
+  );
+  const skip = (page - 1) * limit;
+
+  const query = {
+    "participants.user": currentUser._id,
+  };
+
+  if (filters.conversationId) {
+    if (!isValidObjectId(filters.conversationId)) {
+      throw new ApiError(400, "Invalid conversation ID");
+    }
+
+    const conversation = await loadConversation(
+      filters.conversationId
+    );
+    assertCanViewConversation(currentUser, conversation);
+    query.conversation = filters.conversationId;
+  }
+
+  if (filters.status) {
+    const statuses = String(filters.status)
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) =>
+        Object.values(CALL_STATUSES).includes(value)
+      );
+
+    if (statuses.length === 1) {
+      query.status = statuses[0];
+    } else if (statuses.length > 1) {
+      query.status = { $in: statuses };
+    }
+  }
+
+  if (filters.type) {
+    if (!Object.values(CALL_TYPES).includes(filters.type)) {
+      throw new ApiError(400, "Invalid call type");
+    }
+
+    query.type = filters.type;
+  }
+
+  const [calls, total] = await Promise.all([
+    Call.find(query)
+      .populate("caller", "name role")
+      .populate("participants.user", "name role")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Call.countDocuments(query),
+  ]);
+
+  return {
+    calls: calls.map((call) =>
+      formatCall(call, { includeIceServers: false })
+    ),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 0,
+    },
+  };
 };
 
 export const getActiveCallForConversation = async (

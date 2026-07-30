@@ -7,6 +7,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "seed:admin": "node seeders/seedAdmin.js",
+    "migrate:phase6": "node seeders/migratePhase6.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

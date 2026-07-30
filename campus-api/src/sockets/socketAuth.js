@@ -45,6 +45,14 @@ const socketAuth = async (socket, next) => {
       return next(new Error("User not found"));
     }
 
+    if (user.mustChangePassword) {
+      return next(
+        new Error(
+          "Please change your temporary password before using chat"
+        )
+      );
+    }
+
     const access = canUseChat(user);
 
     if (!access.allowed) {

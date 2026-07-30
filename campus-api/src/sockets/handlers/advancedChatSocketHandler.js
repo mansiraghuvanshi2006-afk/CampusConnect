@@ -355,7 +355,7 @@ export const registerCallHandlers = (io, socket) => {
     })
   );
 
-  // WebRTC signaling — authenticated + call participant checks
+  // WebRTC signaling — both sender and target must be call participants
   socket.on(
     "call:offer",
     withAck(async (payload) => {
@@ -366,13 +366,17 @@ export const registerCallHandlers = (io, socket) => {
         payload.callId
       );
 
-      const targetUserId = payload.targetUserId;
+      const { targetId } = callService.assertCallSignalPermission({
+        call,
+        actorUserId: actor._id,
+        targetUserId: payload.targetUserId,
+      });
 
-      if (!targetUserId) {
-        throw chatError(400, "targetUserId is required", "INVALID_MESSAGE");
+      if (!payload.sdp) {
+        throw chatError(400, "SDP offer is required", "INVALID_MESSAGE");
       }
 
-      io.to(userRoom(targetUserId)).emit("call:offer", {
+      io.to(userRoom(targetId)).emit("call:offer", {
         callId: call._id.toString(),
         fromUserId: actor._id.toString(),
         sdp: payload.sdp,
@@ -392,7 +396,17 @@ export const registerCallHandlers = (io, socket) => {
         payload.callId
       );
 
-      io.to(userRoom(payload.targetUserId)).emit("call:answer", {
+      const { targetId } = callService.assertCallSignalPermission({
+        call,
+        actorUserId: actor._id,
+        targetUserId: payload.targetUserId,
+      });
+
+      if (!payload.sdp) {
+        throw chatError(400, "SDP answer is required", "INVALID_MESSAGE");
+      }
+
+      io.to(userRoom(targetId)).emit("call:answer", {
         callId: call._id.toString(),
         fromUserId: actor._id.toString(),
         sdp: payload.sdp,
@@ -412,7 +426,13 @@ export const registerCallHandlers = (io, socket) => {
         payload.callId
       );
 
-      io.to(userRoom(payload.targetUserId)).emit("call:ice", {
+      const { targetId } = callService.assertCallSignalPermission({
+        call,
+        actorUserId: actor._id,
+        targetUserId: payload.targetUserId,
+      });
+
+      io.to(userRoom(targetId)).emit("call:ice", {
         callId: call._id.toString(),
         fromUserId: actor._id.toString(),
         candidate: payload.candidate,

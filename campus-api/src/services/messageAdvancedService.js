@@ -17,7 +17,7 @@ import {
   assertCanUseChat,
   assertCanViewConversation,
   assertCanSendMessage,
-  assertCanManageConversation,
+  canModerateMessages,
   getActiveMembership,
   isValidObjectId,
 } from "./chatPolicyService.js";
@@ -208,12 +208,7 @@ export const canPinMessage = (user, conversation) => {
     return true;
   }
 
-  try {
-    assertCanManageConversation(user, conversation);
-    return true;
-  } catch {
-    return false;
-  }
+  return canModerateMessages(user, conversation).allowed;
 };
 
 export const canDeleteMessageForEveryone = (
@@ -232,12 +227,7 @@ export const canDeleteMessageForEveryone = (
     return true;
   }
 
-  try {
-    assertCanManageConversation(user, conversation);
-    return true;
-  } catch {
-    return false;
-  }
+  return canModerateMessages(user, conversation).allowed;
 };
 
 export const editMessage = async (

@@ -314,4 +314,102 @@ describe("Phase 5 socket live: reactions, edits, calls", () => {
     expect(endAck.success).toBe(true);
     expect(endAck.data.call.isActive).toBe(false);
   }, 30000);
+
+  it("rejects WebRTC signaling to a non-participant target", async () => {
+    const department = new mongoose.Types.ObjectId();
+    const alice = await createStudent({
+      email: "alice.signal@test.com",
+      department,
+    });
+    const bob = await createStudent({
+      email: "bob.signal@test.com",
+      department,
+    });
+    const eve = await createStudent({
+      email: "eve.signal@test.com",
+      department,
+    });
+
+    const { conversation } =
+      await chatService.createOrGetDirectConversation(
+        alice,
+        bob._id
+      );
+
+    const aliceSocket = await connectAndWait(
+      generateAccessToken(alice)
+    );
+    const bobSocket = await connectAndWait(
+      generateAccessToken(bob)
+    );
+    const eveSocket = await connectAndWait(
+      generateAccessToken(eve)
+    );
+
+    await emitAck(aliceSocket, "conversation:join", {
+      conversationId: conversation.id,
+    });
+    await emitAck(bobSocket, "conversation:join", {
+      conversationId: conversation.id,
+    });
+
+    const startAck = await emitAck(aliceSocket, "call:start", {
+      conversationId: conversation.id,
+      type: "audio",
+    });
+
+    expect(startAck.success).toBe(true);
+
+    await emitAck(bobSocket, "call:accept", {
+      callId: startAck.data.call.id,
+    });
+
+    let eveSawOffer = false;
+    eveSocket.on("call:offer", () => {
+      eveSawOffer = true;
+    });
+
+    const badOfferAck = await emitAck(aliceSocket, "call:offer", {
+      callId: startAck.data.call.id,
+      targetUserId: eve._id.toString(),
+      sdp: { type: "offer", sdp: "v=0-evil" },
+    });
+
+    expect(badOfferAck.success).toBe(false);
+    expect(badOfferAck.message).toMatch(/not a participant/i);
+
+    const badAnswerAck = await emitAck(bobSocket, "call:answer", {
+      callId: startAck.data.call.id,
+      targetUserId: eve._id.toString(),
+      sdp: { type: "answer", sdp: "v=0-evil" },
+    });
+
+    expect(badAnswerAck.success).toBe(false);
+    expect(badAnswerAck.message).toMatch(/not a participant/i);
+
+    const badIceAck = await emitAck(aliceSocket, "call:ice", {
+      callId: startAck.data.call.id,
+      targetUserId: eve._id.toString(),
+      candidate: { candidate: "candidate:evil" },
+    });
+
+    expect(badIceAck.success).toBe(false);
+    expect(badIceAck.message).toMatch(/not a participant/i);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(eveSawOffer).toBe(false);
+
+    const selfOfferAck = await emitAck(aliceSocket, "call:offer", {
+      callId: startAck.data.call.id,
+      targetUserId: alice._id.toString(),
+      sdp: { type: "offer", sdp: "v=0-self" },
+    });
+
+    expect(selfOfferAck.success).toBe(false);
+    expect(selfOfferAck.message).toMatch(/yourself/i);
+
+    await emitAck(aliceSocket, "call:end", {
+      callId: startAck.data.call.id,
+    });
+  }, 30000);
 });

@@ -25,6 +25,7 @@ import LoginPage from "../pages/auth/LoginPage.jsx";
 import RegisterPage from "../pages/auth/RegisterPage.jsx";
 import RegistrationSuccessPage from "../pages/auth/RegistrationSuccessPage.jsx";
 import VerifyEmailPage from "../pages/auth/VerifyEmailPage.jsx";
+import ChangeTemporaryPasswordPage from "../pages/auth/ChangeTemporaryPasswordPage.jsx";
 
 import AdminLoginPage from "../pages/admin/AdminLoginPage.jsx";
 
@@ -139,6 +140,14 @@ const AppRoutes = () => {
         path="/verify-email"
         element={<VerifyEmailPage />}
       />
+
+      {/* Required first-login password change for every role */}
+      <Route element={<ProtectedRoute />}>
+        <Route
+          path="/change-password"
+          element={<ChangeTemporaryPasswordPage />}
+        />
+      </Route>
 
       {/* Student routes */}
       <Route

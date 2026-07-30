@@ -59,6 +59,14 @@ const getPublicUser = (user) => ({
     user.isEmailVerified,
   isActive: user.isActive,
 
+  /*
+    True while an admin-created user still holds
+    their temporary password.
+  */
+  mustChangePassword: Boolean(
+    user.mustChangePassword
+  ),
+
   teacherApprovalStatus:
     user.teacherApprovalStatus,
   teacherApprovedAt:
@@ -347,6 +355,69 @@ export const login = asyncHandler(
       data: {
         user: getPublicUser(user),
         accessToken,
+      },
+    });
+  }
+);
+
+/**
+ * PATCH /api/v1/auth/change-temporary-password
+ *
+ * Required first-login password change for accounts created
+ * by an administrator with a temporary password.
+ *
+ * The current session is preserved so the user is not signed
+ * out mid-flow. Other devices keep their sessions because the
+ * temporary password was never shared with them.
+ */
+export const changeTemporaryPassword = asyncHandler(
+  async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await User.findById(
+      req.user._id
+    ).select("+password");
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    if (!user.mustChangePassword) {
+      throw new ApiError(
+        400,
+        "A temporary password change is not required for this account"
+      );
+    }
+
+    const currentPasswordIsCorrect =
+      await user.comparePassword(currentPassword);
+
+    if (!currentPasswordIsCorrect) {
+      throw new ApiError(
+        401,
+        "Current password is incorrect"
+      );
+    }
+
+    if (currentPassword === newPassword) {
+      throw new ApiError(
+        400,
+        "The new password must be different from your temporary password"
+      );
+    }
+
+    user.password = newPassword;
+    user.mustChangePassword = false;
+
+    await user.save({
+      validateModifiedOnly: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+      data: {
+        user: getPublicUser(user),
       },
     });
   }

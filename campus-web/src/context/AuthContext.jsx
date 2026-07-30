@@ -22,6 +22,12 @@ export const AuthContext =
   createContext(null);
 
 /**
+ * Required first-login password change route.
+ */
+export const CHANGE_PASSWORD_PATH =
+  "/change-password";
+
+/**
  * Return the correct page based on the user's
  * role, profile completion and approval status.
  */
@@ -35,6 +41,14 @@ const getDashboardPath = (userOrRole) => {
 
   if (!user) {
     return "/login";
+  }
+
+  /**
+   * Accounts created by an administrator must replace
+   * their temporary password before anything else.
+   */
+  if (user.mustChangePassword) {
+    return CHANGE_PASSWORD_PATH;
   }
 
   switch (user.role) {

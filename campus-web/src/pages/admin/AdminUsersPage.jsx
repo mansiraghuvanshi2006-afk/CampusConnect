@@ -13,12 +13,15 @@ import {
   import toast from "react-hot-toast";
   
   import DashboardLayout from "../../components/layout/DashboardLayout.jsx";
+  import CreateUserModal from "../../components/admin/CreateUserModal.jsx";
+  import PasswordInput from "../../components/common/PasswordInput.jsx";
   
   import {
     approveTeacher,
     deleteUserPermanently,
     getAllUsers,
     rejectTeacher,
+    resetUserPassword,
     updateAdminUser,
     updateUserStatus,
   } from "../../services/adminService.js";
@@ -37,6 +40,7 @@ import {
     "all",
     "students",
     "teachers",
+    "admins",
     "pending-teachers",
     "active",
     "inactive",
@@ -59,6 +63,12 @@ import {
       title: "Teachers",
       description:
         "View and manage registered teacher accounts.",
+    },
+  
+    admins: {
+      title: "Administrators",
+      description:
+        "View and manage platform administrator accounts.",
     },
   
     "pending-teachers": {
@@ -91,6 +101,38 @@ import {
   
   const getUserId = (user) =>
     user?._id || user?.id || "";
+  
+  const getDepartmentId = (department) => {
+    if (!department) {
+      return "";
+    }
+  
+    if (typeof department === "string") {
+      return department;
+    }
+  
+    return department._id || department.id || "";
+  };
+  
+  /**
+   * The API returns a populated department object, so the
+   * label falls back to the code or a placeholder.
+   */
+  const getDepartmentLabel = (department) => {
+    if (!department) {
+      return "Not assigned";
+    }
+  
+    if (typeof department === "string") {
+      return "Assigned";
+    }
+  
+    return (
+      department.name ||
+      department.code ||
+      "Assigned"
+    );
+  };
   
   const getApprovalStatus = (user) =>
     user?.teacherApprovalStatus ||
@@ -172,6 +214,15 @@ import {
     const currentSearch =
       searchParams.get("search") || "";
   
+    const currentRole =
+      searchParams.get("role") || "";
+  
+    const currentDepartment =
+      searchParams.get("department") || "";
+  
+    const currentYear =
+      searchParams.get("year") || "";
+  
     const pageDetails =
       typeDetails[type] ||
       typeDetails.all;
@@ -240,6 +291,26 @@ import {
       setRejectionReason,
     ] = useState("");
   
+    const [
+      isCreateModalOpen,
+      setIsCreateModalOpen,
+    ] = useState(false);
+  
+    const [
+      resettingUser,
+      setResettingUser,
+    ] = useState(null);
+  
+    const [
+      resetPassword,
+      setResetPassword,
+    ] = useState("");
+  
+    const [
+      filterYears,
+      setFilterYears,
+    ] = useState([]);
+  
     const loadUsers = useCallback(
       async () => {
         try {
@@ -250,6 +321,9 @@ import {
             await getAllUsers({
               type,
               search: currentSearch,
+              role: currentRole,
+              department: currentDepartment,
+              year: currentYear,
               page: currentPage,
               limit: 10,
             });
@@ -314,6 +388,9 @@ import {
       [
         type,
         currentSearch,
+        currentRole,
+        currentDepartment,
+        currentYear,
         currentPage,
       ]
     );
@@ -387,6 +464,47 @@ import {
       }
     };
   
+    /**
+     * Academic-year options for the department filter.
+     */
+    useEffect(() => {
+      let isCancelled = false;
+  
+      const loadFilterYears = async () => {
+        if (!currentDepartment) {
+          setFilterYears([]);
+  
+          return;
+        }
+  
+        try {
+          const response = await getAcademicYears(
+            currentDepartment
+          );
+  
+          if (isCancelled) {
+            return;
+          }
+  
+          setFilterYears(
+            Array.isArray(response?.data?.academicYears)
+              ? response.data.academicYears
+              : []
+          );
+        } catch {
+          if (!isCancelled) {
+            setFilterYears([]);
+          }
+        }
+      };
+  
+      void loadFilterYears();
+  
+      return () => {
+        isCancelled = true;
+      };
+    }, [currentDepartment]);
+  
     const updateParams = (
       updates
     ) => {
@@ -420,6 +538,40 @@ import {
     ) => {
       updateParams({
         type: event.target.value,
+        page: 1,
+      });
+    };
+  
+    const handleRoleFilterChange = (event) => {
+      updateParams({
+        role: event.target.value,
+        page: 1,
+      });
+    };
+  
+    const handleDepartmentFilterChange = (event) => {
+      updateParams({
+        department: event.target.value,
+        year: "",
+        page: 1,
+      });
+    };
+  
+    const handleYearFilterChange = (event) => {
+      updateParams({
+        year: event.target.value,
+        page: 1,
+      });
+    };
+  
+    const clearFilters = () => {
+      setSearchInput("");
+  
+      updateParams({
+        search: "",
+        role: "",
+        department: "",
+        year: "",
         page: 1,
       });
     };
@@ -460,11 +612,9 @@ import {
     };
   
     const openEditModal = (user) => {
-      const departmentId =
-        user?.department?._id ||
-        user?.department?.id ||
-        user?.department ||
-        "";
+      const departmentId = getDepartmentId(
+        user?.department
+      );
 
       setEditingUser(user);
   
@@ -594,8 +744,15 @@ import {
         email,
         role: editForm.role,
         department:
-          department || null,
+          editForm.role === "admin"
+            ? null
+            : department || null,
       };
+  
+      if (editForm.role === "admin") {
+        payload.year = null;
+        payload.teachingYears = [];
+      }
   
       if (
         editForm.role ===
@@ -666,6 +823,79 @@ import {
       } finally {
         setProcessingUserId(null);
       }
+    };
+  
+    const openResetPasswordModal = (user) => {
+      setResettingUser(user);
+      setResetPassword("");
+    };
+  
+    const closeResetPasswordModal = () => {
+      if (processingUserId) {
+        return;
+      }
+  
+      setResettingUser(null);
+      setResetPassword("");
+    };
+  
+    const handleResetPassword = async (event) => {
+      event.preventDefault();
+  
+      const userId = getUserId(resettingUser);
+  
+      if (!userId) {
+        toast.error("User ID is unavailable");
+  
+        return;
+      }
+  
+      if (
+        resetPassword.length < 8 ||
+        !/[a-z]/.test(resetPassword) ||
+        !/[A-Z]/.test(resetPassword) ||
+        !/[0-9]/.test(resetPassword)
+      ) {
+        toast.error(
+          "Use at least 8 characters with upper and lower case letters and a number"
+        );
+  
+        return;
+      }
+  
+      try {
+        setProcessingUserId(userId);
+  
+        const response = await resetUserPassword(
+          userId,
+          resetPassword
+        );
+  
+        toast.success(
+          response?.message ||
+            "Temporary password assigned"
+        );
+  
+        setResettingUser(null);
+        setResetPassword("");
+  
+        await loadUsers();
+      } catch (error) {
+        toast.error(
+          getErrorMessage(
+            error,
+            "Unable to reset the password"
+          )
+        );
+      } finally {
+        setProcessingUserId(null);
+      }
+    };
+  
+    const handleUserCreated = async () => {
+      setIsCreateModalOpen(false);
+  
+      await loadUsers();
     };
   
     const openStatusModal = (
@@ -1030,6 +1260,10 @@ import {
                       Teachers
                     </option>
   
+                    <option value="admins">
+                      Administrators
+                    </option>
+  
                     <option value="pending-teachers">
                       Pending Teachers
                     </option>
@@ -1043,6 +1277,16 @@ import {
                     </option>
                   </select>
                 </div>
+  
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsCreateModalOpen(true)
+                  }
+                  className="rounded-xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-purple-700"
+                >
+                  + Create User
+                </button>
   
                 <button
                   type="button"
@@ -1090,6 +1334,132 @@ import {
                   </button>
                 )}
               </form>
+            </div>
+  
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div>
+                <label
+                  htmlFor="roleFilter"
+                  className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#b5bac1]"
+                >
+                  Role
+                </label>
+  
+                <select
+                  id="roleFilter"
+                  value={currentRole}
+                  onChange={handleRoleFilterChange}
+                  className="min-w-44 rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
+                >
+                  <option value="" className="bg-[#1e1f22]">
+                    Any role
+                  </option>
+  
+                  <option
+                    value="student"
+                    className="bg-[#1e1f22]"
+                  >
+                    Student
+                  </option>
+  
+                  <option
+                    value="teacher"
+                    className="bg-[#1e1f22]"
+                  >
+                    Teacher
+                  </option>
+  
+                  <option
+                    value="admin"
+                    className="bg-[#1e1f22]"
+                  >
+                    Admin
+                  </option>
+                </select>
+              </div>
+  
+              <div>
+                <label
+                  htmlFor="departmentFilter"
+                  className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#b5bac1]"
+                >
+                  Department
+                </label>
+  
+                <select
+                  id="departmentFilter"
+                  value={currentDepartment}
+                  onChange={
+                    handleDepartmentFilterChange
+                  }
+                  className="min-w-52 rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
+                >
+                  <option value="" className="bg-[#1e1f22]">
+                    Any department
+                  </option>
+  
+                  {departments.map((department) => (
+                    <option
+                      key={department._id || department.id}
+                      value={
+                        department._id || department.id
+                      }
+                      className="bg-[#1e1f22]"
+                    >
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+  
+              <div>
+                <label
+                  htmlFor="yearFilter"
+                  className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#b5bac1]"
+                >
+                  Academic year
+                </label>
+  
+                <select
+                  id="yearFilter"
+                  value={currentYear}
+                  onChange={handleYearFilterChange}
+                  disabled={!currentDepartment}
+                  className="min-w-44 rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#1e1f22]">
+                    {currentDepartment
+                      ? "Any year"
+                      : "Select a department"}
+                  </option>
+  
+                  {filterYears.map((academicYear) => (
+                    <option
+                      key={
+                        academicYear._id ||
+                        academicYear.id
+                      }
+                      value={academicYear.yearNumber}
+                      className="bg-[#1e1f22]"
+                    >
+                      {academicYear.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+  
+              {(currentRole ||
+                currentDepartment ||
+                currentYear ||
+                currentSearch) && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                >
+                  Reset filters
+                </button>
+              )}
             </div>
           </div>
   
@@ -1229,6 +1599,12 @@ import {
                                   {user.email ||
                                     "No email"}
                                 </p>
+  
+                                {user.mustChangePassword && (
+                                  <p className="mt-2 inline-block rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-200">
+                                    Temporary password
+                                  </p>
+                                )}
                               </td>
   
                               <td className="px-5 py-5">
@@ -1239,8 +1615,9 @@ import {
                               </td>
   
                               <td className="px-5 py-5 text-sm text-[#b5bac1]">
-                                {user.department ||
-                                  "Not assigned"}
+                                {getDepartmentLabel(
+                                  user.department
+                                )}
                               </td>
   
                               <td className="px-5 py-5 text-sm text-[#b5bac1]">
@@ -1389,6 +1766,21 @@ import {
                                       isProcessing
                                     }
                                     onClick={() =>
+                                      openResetPasswordModal(
+                                        user
+                                      )
+                                    }
+                                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Reset password
+                                  </button>
+  
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      isProcessing
+                                    }
+                                    onClick={() =>
                                       openDeleteModal(
                                         user
                                       )
@@ -1516,13 +1908,12 @@ import {
                     Full name
                   </label>
   
-                  <select
+                  <input
                     id="name"
                     name="name"
+                    type="text"
                     value={editForm.name}
-                    onChange={
-                      handleDepartmentChange
-                    }
+                    onChange={handleEditChange}
                     disabled={
                       processingUserId ===
                       editingUserId
@@ -1583,9 +1974,14 @@ import {
                     <option value="teacher">
                       Teacher
                     </option>
+  
+                    <option value="admin">
+                      Admin
+                    </option>
                   </select>
                 </div>
   
+                {editForm.role !== "admin" && (
                 <div>
                   <label
                     htmlFor="department"
@@ -1623,6 +2019,7 @@ import {
                     ))}
                   </select>
                 </div>
+                )}
   
                 {editForm.role ===
                   "student" && (
@@ -1977,6 +2374,93 @@ import {
               </form>
             </section>
           </div>
+        )}
+  
+        {resettingUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+            <section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2b2d31] p-6 shadow-2xl">
+              <h2 className="text-xl font-bold text-white">
+                Reset Password
+              </h2>
+  
+              <p className="mt-2 text-sm leading-6 text-[#b5bac1]">
+                Assign a new temporary password for{" "}
+                <span className="font-semibold text-white">
+                  {resettingUser.name}
+                </span>
+                . They will be required to change it at
+                their next login.
+              </p>
+  
+              <form
+                onSubmit={handleResetPassword}
+                className="mt-5 space-y-4"
+              >
+                <div>
+                  <label
+                    htmlFor="temporaryPassword"
+                    className="mb-2 block text-sm font-semibold text-white"
+                  >
+                    Temporary password
+                  </label>
+  
+                  <PasswordInput
+                    id="temporaryPassword"
+                    name="temporaryPassword"
+                    value={resetPassword}
+                    onChange={(event) =>
+                      setResetPassword(
+                        event.target.value
+                      )
+                    }
+                    disabled={Boolean(
+                      processingUserId
+                    )}
+                    placeholder="Minimum 8 characters"
+                    autoComplete="new-password"
+                  />
+  
+                  <p className="mt-2 text-xs text-[#949ba4]">
+                    Must include upper and lower case
+                    letters and a number.
+                  </p>
+                </div>
+  
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeResetPasswordModal}
+                    disabled={Boolean(
+                      processingUserId
+                    )}
+                    className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 font-semibold text-white transition hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+  
+                  <button
+                    type="submit"
+                    disabled={Boolean(
+                      processingUserId
+                    )}
+                    className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {processingUserId
+                      ? "Saving..."
+                      : "Reset Password"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
+  
+        {isCreateModalOpen && (
+          <CreateUserModal
+            departments={departments}
+            onClose={() => setIsCreateModalOpen(false)}
+            onCreated={handleUserCreated}
+          />
         )}
       </DashboardLayout>
     );

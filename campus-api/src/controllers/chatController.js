@@ -221,9 +221,112 @@ export const deleteConversation = asyncHandler(
     return sendSuccess(
       res,
       200,
-      "Conversation deactivated successfully",
+      "Conversation deleted successfully",
       { conversation }
     );
+  }
+);
+
+export const clearConversationForMe = asyncHandler(
+  async (req, res) => {
+    requireChatAccess(req);
+
+    const conversation = await chatService.clearConversationForMe(
+      req.user,
+      req.params.conversationId,
+      getOnlineUserIds()
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "Chat cleared for you",
+      { conversation }
+    );
+  }
+);
+
+export const hideConversationForMe = asyncHandler(
+  async (req, res) => {
+    requireChatAccess(req);
+
+    const conversation = await chatService.hideConversationForMe(
+      req.user,
+      req.params.conversationId,
+      getOnlineUserIds()
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "Conversation removed from your list",
+      { conversation }
+    );
+  }
+);
+
+export const leaveConversation = asyncHandler(
+  async (req, res) => {
+    requireChatAccess(req);
+
+    const result = await chatService.leaveConversation(
+      req.user,
+      req.params.conversationId,
+      getOnlineUserIds()
+    );
+
+    await withIO(async (io, forceLeaveConversation) => {
+      const payload = {
+        conversationId: req.params.conversationId,
+        removedUserId: result.leftUserId,
+        removedBy: {
+          id: req.user._id.toString(),
+          name: req.user.name,
+        },
+        reason: "left",
+        createdAt: new Date().toISOString(),
+      };
+
+      io.to(
+        `conversation:${req.params.conversationId}`
+      ).emit("member:removed", payload);
+
+      io.to(`user:${result.leftUserId}`).emit(
+        "member:removed",
+        payload
+      );
+
+      if (typeof forceLeaveConversation === "function") {
+        forceLeaveConversation(
+          result.leftUserId,
+          req.params.conversationId
+        );
+      }
+
+      await emitConversationUpdateToMembers({
+        io,
+        conversationId: req.params.conversationId,
+      });
+
+      if (result.systemMessage) {
+        await emitNewMessageCascade({
+          io,
+          conversation: {
+            _id: req.params.conversationId,
+            members: (result.conversation?.members || []).map(
+              (member) => ({
+                user: member.id,
+                isActive: true,
+              })
+            ),
+          },
+          message: result.systemMessage,
+          senderId: req.user._id,
+        });
+      }
+    });
+
+    return sendSuccess(res, 200, "Left the group", result);
   }
 );
 

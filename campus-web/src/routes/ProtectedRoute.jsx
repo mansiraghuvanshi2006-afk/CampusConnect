@@ -5,6 +5,7 @@ import {
 } from "react-router-dom";
 
 import useAuth from "../hooks/useAuth.js";
+import { CHANGE_PASSWORD_PATH } from "../context/AuthContext.jsx";
 
 /**
  * Return the required route for a user based on
@@ -13,6 +14,10 @@ import useAuth from "../hooks/useAuth.js";
 const getRequiredUserPath = (user) => {
   if (!user) {
     return "/login";
+  }
+
+  if (user.mustChangePassword) {
+    return CHANGE_PASSWORD_PATH;
   }
 
   /**
@@ -95,6 +100,44 @@ const ProtectedRoute = ({
         }}
       />
     );
+  }
+
+  /**
+   * A temporary password must be replaced before any
+   * other protected page becomes reachable, including
+   * URLs typed by hand.
+   */
+  if (
+    user.mustChangePassword &&
+    location.pathname !== CHANGE_PASSWORD_PATH
+  ) {
+    return (
+      <Navigate
+        to={CHANGE_PASSWORD_PATH}
+        replace
+      />
+    );
+  }
+
+  /**
+   * Nobody else should reach the password-change page.
+   */
+  if (location.pathname === CHANGE_PASSWORD_PATH) {
+    if (!user.mustChangePassword) {
+      return (
+        <Navigate
+          to={getRequiredUserPath(user)}
+          replace
+        />
+      );
+    }
+
+    /*
+      The onboarding and approval redirects below must not
+      run here, otherwise the two guards would bounce the
+      user back and forth.
+    */
+    return <Outlet />;
   }
 
   /**

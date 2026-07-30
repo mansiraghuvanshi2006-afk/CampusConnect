@@ -73,11 +73,22 @@ const LoginPage = () => {
         return;
       }
 
+      const dashboardPath = getDashboardPath(user);
+
+      // Admin-created accounts must set their own password first.
+      if (user.mustChangePassword) {
+        toast.success("Please set a new password to continue");
+
+        navigate(dashboardPath, {
+          replace: true,
+        });
+
+        return;
+      }
+
       toast.success(`Welcome back, ${user.name}`);
 
       const requestedPath = location.state?.from;
-
-      const dashboardPath = getDashboardPath(user);
 
       navigate(requestedPath || dashboardPath, {
         replace: true,

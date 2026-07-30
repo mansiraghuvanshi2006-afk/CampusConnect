@@ -463,6 +463,39 @@ export const getCall = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, "Call retrieved", { call });
 });
 
+export const listCalls = asyncHandler(async (req, res) => {
+  requireChatAccess(req);
+
+  const result = await callService.listCallsForUser(req.user, {
+    conversationId: req.query.conversationId,
+    status: req.query.status,
+    type: req.query.type,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+
+  return sendSuccess(res, 200, "Call history retrieved", result);
+});
+
+export const listConversationCalls = asyncHandler(async (req, res) => {
+  requireChatAccess(req);
+
+  const result = await callService.listCallsForUser(req.user, {
+    conversationId: req.params.conversationId,
+    status: req.query.status,
+    type: req.query.type,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+
+  return sendSuccess(
+    res,
+    200,
+    "Conversation call history retrieved",
+    result
+  );
+});
+
 export const acceptCall = asyncHandler(async (req, res) => {
   requireChatAccess(req);
 

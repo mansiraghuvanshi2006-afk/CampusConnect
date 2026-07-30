@@ -37,21 +37,27 @@ import { MdOutlinePushPin } from "react-icons/md";
 import DashboardLayout from "../../components/layout/DashboardLayout.jsx";
 import NewChatModal from "../../components/chat/NewChatModal.jsx";
 import CreateGroupModal from "../../components/chat/CreateGroupModal.jsx";
+import GroupDetailsPanel from "../../components/chat/GroupDetailsPanel.jsx";
+import CallHistoryPanel from "../../components/chat/CallHistoryPanel.jsx";
 import MessageBubble from "../../components/chat/MessageBubble.jsx";
 import VoiceRecorder from "../../components/chat/VoiceRecorder.jsx";
 import ChatEmojiPicker from "../../components/chat/ChatEmojiPicker.jsx";
 import CallOverlay from "../../components/chat/CallOverlay.jsx";
 import NotificationCenter from "../../components/chat/NotificationCenter.jsx";
+import ConfirmDialog from "../../components/chat/ConfirmDialog.jsx";
 
 import { useAuth } from "../../context/AuthContext.jsx";
 import useSocket from "../../socket/useSocket.js";
 import useWebRTCCall from "../../hooks/useWebRTCCall.js";
+import useResizableSidebar from "../../hooks/useResizableSidebar.js";
 import { emitWithAck } from "../../socket/socketClient.js";
 
 import {
   acceptCall,
+  clearConversationForMe,
   createDirectConversation,
   createGroup,
+  deleteGroupConversation,
   deleteMessageForEveryone,
   deleteMessageForMe,
   editMessage,
@@ -61,6 +67,9 @@ import {
   getMessages,
   getPinnedMessages,
   getUnreadNotificationCount,
+  getUploadAbsoluteUrl,
+  hideConversationForMe,
+  leaveConversation,
   markConversationRead,
   pinMessage,
   reactToMessage,
@@ -80,7 +89,6 @@ import {
   createTemporaryId,
   formatConversationTime,
   formatDateSeparator,
-  formatMessageTime,
   getConversationTitle,
   getInitials,
   getUserId,
@@ -149,18 +157,37 @@ const ChatPage = () => {
   const [showPinned, setShowPinned] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [forwardTarget, setForwardTarget] = useState(null);
+  const [forwardSelectedIds, setForwardSelectedIds] = useState([]);
   const [activeCall, setActiveCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [notificationUnread, setNotificationUnread] =
     useState(0);
   const [recordingVoice, setRecordingVoice] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [isDesktopLayout, setIsDesktopLayout] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(min-width: 768px)").matches
+      : true
+  );
 
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [createGroupOpen, setCreateGroupOpen] =
     useState(false);
+  /*
+    The panel is tied to a conversation ID so switching chats
+    closes it without an extra effect.
+  */
+  const [groupPanelConversationId, setGroupPanelConversationId] =
+    useState(null);
+  const [callHistoryConversationId, setCallHistoryConversationId] =
+    useState(null);
 
   const fileInputRef = useRef(null);
+  const composerRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const conversationMenuRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -171,26 +198,77 @@ const ChatPage = () => {
   const canCreateGroup =
     user?.role === "teacher" || user?.role === "admin";
 
+  const {
+    width: sidebarWidth,
+    isResizing,
+    onResizePointerDown,
+    onResizeKeyDown,
+  } = useResizableSidebar({ enabled: isDesktopLayout });
+
   useEffect(() => {
-    if (!emojiPickerOpen) {
+    const media = window.matchMedia("(min-width: 768px)");
+    const onChange = () => setIsDesktopLayout(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!emojiPickerOpen && !menuOpen) {
       return undefined;
     }
 
     const handlePointerDown = (event) => {
-      if (!emojiPickerRef.current?.contains(event.target)) {
+      if (
+        emojiPickerOpen &&
+        !emojiPickerRef.current?.contains(event.target)
+      ) {
         setEmojiPickerOpen(false);
+      }
+
+      if (
+        menuOpen &&
+        !conversationMenuRef.current?.contains(event.target)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setEmojiPickerOpen(false);
+        setMenuOpen(false);
       }
     };
 
     document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [emojiPickerOpen]);
+  }, [emojiPickerOpen, menuOpen]);
 
   const insertComposerEmoji = (emoji) => {
-    setDraft((previous) => `${previous}${emoji}`);
+    const textarea = composerRef.current;
+
+    if (!textarea) {
+      setDraft((previous) => `${previous}${emoji}`);
+      setEmojiPickerOpen(false);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? draft.length;
+    const end = textarea.selectionEnd ?? draft.length;
+    const next = `${draft.slice(0, start)}${emoji}${draft.slice(end)}`;
+    setDraft(next);
     setEmojiPickerOpen(false);
+
+    requestAnimationFrame(() => {
+      const cursor = start + emoji.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
   };
 
   const {
@@ -233,6 +311,36 @@ const ChatPage = () => {
       );
     });
   }, [conversations, sidebarSearch]);
+
+  /**
+   * Pinned chats stay on top, then groups, then direct chats.
+   * Ordering inside each block already follows last activity.
+   */
+  const conversationSections = useMemo(() => {
+    const pinned = [];
+    const groups = [];
+    const directs = [];
+
+    for (const conversation of filteredConversations) {
+      if (conversation.isPinned) {
+        pinned.push(conversation);
+      } else if (conversation.type === "direct") {
+        directs.push(conversation);
+      } else {
+        groups.push(conversation);
+      }
+    }
+
+    return [
+      { id: "pinned", label: "Pinned", items: pinned },
+      { id: "groups", label: "Groups", items: groups },
+      {
+        id: "direct",
+        label: "Direct chats",
+        items: directs,
+      },
+    ].filter((section) => section.items.length > 0);
+  }, [filteredConversations]);
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -283,6 +391,43 @@ const ChatPage = () => {
     },
     [chatBasePath, navigate]
   );
+
+  const groupPanelOpen =
+    Boolean(conversationId) &&
+    groupPanelConversationId === conversationId;
+
+  const callHistoryOpen =
+    Boolean(conversationId) &&
+    callHistoryConversationId === conversationId;
+
+  const setGroupPanelOpen = (open) => {
+    setGroupPanelConversationId(
+      open ? conversationId || null : null
+    );
+
+    if (open) {
+      setCallHistoryConversationId(null);
+    }
+  };
+
+  const setCallHistoryOpen = (open) => {
+    setCallHistoryConversationId(
+      open ? conversationId || null : null
+    );
+
+    if (open) {
+      setGroupPanelConversationId(null);
+    }
+  };
+
+  const toggleGroupPanel = () => {
+    setCallHistoryConversationId(null);
+    setGroupPanelConversationId((previous) =>
+      previous === conversationId
+        ? null
+        : conversationId || null
+    );
+  };
 
   const markActiveRead = useCallback(
     async (targetConversationId, messageList) => {
@@ -1124,6 +1269,22 @@ const ChatPage = () => {
     toast.success("Group created");
   };
 
+  const handleGroupUpdated = (conversation) => {
+    if (!conversation?.id) {
+      return;
+    }
+
+    setConversations((previous) =>
+      upsertConversation(previous, conversation)
+    );
+
+    setActiveConversation((previous) =>
+      previous && previous.id === conversation.id
+        ? { ...previous, ...conversation }
+        : previous
+    );
+  };
+
   const handlePin = async () => {
     if (!conversationId) {
       return;
@@ -1174,7 +1335,31 @@ const ChatPage = () => {
     }
   };
 
-  const handleDeleteMe = async (message) => {
+  const handleDeleteMe = (message) => {
+    setConfirmAction({
+      type: "deleteMe",
+      message,
+      title: "Delete for me",
+      description:
+        "This message will be removed only from your view.",
+      confirmLabel: "Delete for me",
+      destructive: true,
+    });
+  };
+
+  const handleDeleteEveryone = (message) => {
+    setConfirmAction({
+      type: "deleteEveryone",
+      message,
+      title: "Delete for everyone",
+      description:
+        'This message will be replaced with "This message was deleted" for conversation members.',
+      confirmLabel: "Delete for everyone",
+      destructive: true,
+    });
+  };
+
+  const runDeleteMe = async (message) => {
     try {
       if (socket?.connected) {
         await emitWithAck("message:delete", {
@@ -1193,10 +1378,11 @@ const ChatPage = () => {
       );
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to delete"));
+      throw error;
     }
   };
 
-  const handleDeleteEveryone = async (message) => {
+  const runDeleteEveryone = async (message) => {
     try {
       let saved;
 
@@ -1218,6 +1404,7 @@ const ChatPage = () => {
       );
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to delete"));
+      throw error;
     }
   };
 
@@ -1243,27 +1430,150 @@ const ChatPage = () => {
 
   const handleForward = async (message) => {
     setForwardTarget(message);
+    setForwardSelectedIds([]);
   };
 
-  const confirmForward = async (targetConversationId) => {
-    if (!forwardTarget) return;
+  const toggleForwardSelection = (id) => {
+    setForwardSelectedIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id]
+    );
+  };
+
+  const confirmForward = async () => {
+    if (!forwardTarget || forwardSelectedIds.length === 0) return;
 
     try {
       if (socket?.connected) {
         await emitWithAck("message:forward", {
           messageId: forwardTarget.id,
-          conversationIds: [targetConversationId],
+          conversationIds: forwardSelectedIds,
         });
       } else {
-        await forwardMessage(forwardTarget.id, [
-          targetConversationId,
-        ]);
+        await forwardMessage(forwardTarget.id, forwardSelectedIds);
       }
 
-      toast.success("Message forwarded");
+      toast.success(
+        forwardSelectedIds.length === 1
+          ? "Message forwarded"
+          : `Message forwarded to ${forwardSelectedIds.length} chats`
+      );
       setForwardTarget(null);
+      setForwardSelectedIds([]);
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to forward"));
+    }
+  };
+
+  const openClearChatConfirm = () => {
+    setMenuOpen(false);
+    setConfirmText("");
+    setConfirmAction({
+      type: "clearChat",
+      title: "Clear chat for me",
+      description:
+        "This clears the chat only for you. Other members keep their message history.",
+      confirmLabel: "Clear chat",
+      destructive: true,
+    });
+  };
+
+  const openHideDirectConfirm = () => {
+    setMenuOpen(false);
+    setConfirmText("");
+    setConfirmAction({
+      type: "hideDirect",
+      title: "Delete conversation",
+      description:
+        "This removes the conversation from your list only. The other person keeps the chat. It may reappear if they message you again.",
+      confirmLabel: "Delete for me",
+      destructive: true,
+    });
+  };
+
+  const openLeaveGroupConfirm = () => {
+    setMenuOpen(false);
+    setConfirmText("");
+    setConfirmAction({
+      type: "leaveGroup",
+      title: "Leave group",
+      description:
+        "You will leave this group and lose access until you are added again.",
+      confirmLabel: "Leave group",
+      destructive: true,
+    });
+  };
+
+  const openDeleteGroupConfirm = () => {
+    setMenuOpen(false);
+    setConfirmText("");
+    setConfirmAction({
+      type: "deleteGroup",
+      title: "Delete group",
+      description:
+        "This permanently deactivates the group for all members. Type the group name to confirm.",
+      confirmLabel: "Delete group",
+      destructive: true,
+      requireText: getConversationTitle(activeConversation),
+    });
+  };
+
+  const runConfirmAction = async () => {
+    if (!confirmAction || !conversationId) {
+      return;
+    }
+
+    setConfirmBusy(true);
+
+    try {
+      if (confirmAction.type === "deleteMe") {
+        await runDeleteMe(confirmAction.message);
+      } else if (confirmAction.type === "deleteEveryone") {
+        await runDeleteEveryone(confirmAction.message);
+      } else if (confirmAction.type === "clearChat") {
+        await clearConversationForMe(conversationId);
+        setMessages([]);
+        setHasMoreMessages(false);
+        toast.success("Chat cleared for you");
+      } else if (confirmAction.type === "hideDirect") {
+        await hideConversationForMe(conversationId);
+        setConversations((previous) =>
+          previous.filter((item) => item.id !== conversationId)
+        );
+        setActiveConversation(null);
+        navigate(chatBasePath);
+        toast.success("Conversation removed from your list");
+      } else if (confirmAction.type === "leaveGroup") {
+        await leaveConversation(conversationId);
+        setConversations((previous) =>
+          previous.filter((item) => item.id !== conversationId)
+        );
+        setActiveConversation(null);
+        navigate(chatBasePath);
+        toast.success("You left the group");
+      } else if (confirmAction.type === "deleteGroup") {
+        await deleteGroupConversation(conversationId);
+        setConversations((previous) =>
+          previous.filter((item) => item.id !== conversationId)
+        );
+        setActiveConversation(null);
+        navigate(chatBasePath);
+        toast.success("Group deleted");
+      }
+
+      setConfirmAction(null);
+      setConfirmText("");
+    } catch (error) {
+      if (
+        !["deleteMe", "deleteEveryone"].includes(confirmAction.type)
+      ) {
+        toast.error(
+          getErrorMessage(error, "Unable to complete action")
+        );
+      }
+    } finally {
+      setConfirmBusy(false);
     }
   };
 
@@ -1360,7 +1670,21 @@ const ChatPage = () => {
 
   const jumpToMessage = (messageId) => {
     const node = document.getElementById(`message-${messageId}`);
-    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (!node) {
+      toast.error("Original message is unavailable");
+      return;
+    }
+
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.classList.add("ring-2", "ring-purple-400", "rounded-2xl");
+    window.setTimeout(() => {
+      node.classList.remove(
+        "ring-2",
+        "ring-purple-400",
+        "rounded-2xl"
+      );
+    }, 1600);
   };
 
   const handleStartCall = async (type) => {
@@ -1550,17 +1874,104 @@ const ChatPage = () => {
     }, []);
   }, [messages, currentUserId]);
 
+  const renderConversationItem = (conversation) => {
+    const title = getConversationTitle(conversation);
+    const isActive = conversation.id === conversationId;
+    const isGroup = conversation.type !== "direct";
+    const online =
+      !isGroup && conversation.partner?.id
+        ? isUserOnline(conversation.partner.id)
+        : false;
+
+    return (
+      <button
+        key={conversation.id}
+        type="button"
+        onClick={() => openConversation(conversation.id)}
+        className={`flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left transition ${
+          isActive
+            ? "bg-purple-600/20"
+            : "hover:bg-white/5"
+        }`}
+      >
+        <div className="relative shrink-0">
+          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-purple-600/30 text-sm font-bold text-purple-100">
+            {isGroup && conversation.image ? (
+              <img
+                src={getUploadAbsoluteUrl(
+                  conversation.image
+                )}
+                alt={title}
+                className="h-full w-full object-cover"
+              />
+            ) : isGroup ? (
+              <FiUsers className="h-5 w-5" />
+            ) : (
+              getInitials(title)
+            )}
+          </div>
+
+          {online && (
+            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#2b2d31] bg-emerald-400" />
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="flex min-w-0 items-center gap-1 truncate font-semibold text-white">
+              {conversation.isPinned && (
+                <MdOutlinePushPin className="h-3.5 w-3.5 shrink-0 text-purple-300" />
+              )}
+
+              <span className="truncate">{title}</span>
+            </p>
+
+            <span className="shrink-0 text-[11px] text-[#949ba4]">
+              {formatConversationTime(
+                conversation.lastMessageAt
+              )}
+            </span>
+          </div>
+
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="truncate text-xs text-[#b5bac1]">
+              {conversation.lastMessage?.text ||
+                "No messages yet"}
+            </p>
+
+            {conversation.unreadCount > 0 && (
+              <span className="inline-flex min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-purple-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {conversation.unreadCount > 99
+                  ? "99+"
+                  : conversation.unreadCount}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
   return (
     <DashboardLayout
       title="Campus Chat"
       description="Realtime campus messaging"
     >
-      <div className="-mx-4 -my-8 flex h-[calc(100vh-8.5rem)] min-h-[32rem] overflow-hidden border-y border-white/10 bg-[#313338] sm:-mx-6 lg:-mx-8 lg:rounded-2xl lg:border">
+      <div
+        className={`-mx-4 -my-8 flex h-[calc(100dvh-8.5rem)] min-h-[28rem] overflow-hidden border-y border-white/10 bg-[#313338] sm:-mx-6 lg:-mx-8 lg:h-[calc(100dvh-7.5rem)] lg:rounded-2xl lg:border ${
+          isResizing ? "select-none" : ""
+        }`}
+      >
         {/* Sidebar */}
         <aside
           className={`${
             showChatPane ? "hidden md:flex" : "flex"
-          } w-full flex-col border-r border-white/10 bg-[#2b2d31] md:w-[22rem] lg:w-[24rem]`}
+          } w-full min-w-0 flex-col border-r border-white/10 bg-[#2b2d31] md:shrink-0`}
+          style={
+            isDesktopLayout
+              ? { width: `${sidebarWidth}px`, maxWidth: "45vw" }
+              : undefined
+          }
         >
           <div className="border-b border-white/10 p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
@@ -1651,82 +2062,39 @@ const ChatPage = () => {
                 </div>
               )}
 
-            {filteredConversations.map((conversation) => {
-              const title =
-                getConversationTitle(conversation);
-              const isActive =
-                conversation.id === conversationId;
-              const online =
-                conversation.type === "direct" &&
-                conversation.partner?.id
-                  ? isUserOnline(conversation.partner.id)
-                  : false;
+            {conversationSections.map((section) => (
+              <div key={section.id}>
+                <p className="sticky top-0 z-10 bg-[#2b2d31]/95 px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-[#949ba4] backdrop-blur">
+                  {section.label}
+                </p>
 
-              return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  onClick={() =>
-                    openConversation(conversation.id)
-                  }
-                  className={`flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left transition ${
-                    isActive
-                      ? "bg-purple-600/20"
-                      : "hover:bg-white/5"
-                  }`}
-                >
-                  <div className="relative">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-purple-600/30 text-sm font-bold text-purple-100">
-                      {conversation.type === "direct" ? (
-                        getInitials(title)
-                      ) : (
-                        <FiUsers className="h-5 w-5" />
-                      )}
-                    </div>
-
-                    {online && (
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#2b2d31] bg-emerald-400" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="flex min-w-0 items-center gap-1 truncate font-semibold text-white">
-                        {conversation.isPinned && (
-                          <MdOutlinePushPin className="h-3.5 w-3.5 shrink-0 text-purple-300" />
-                        )}
-                        <span className="truncate">
-                          {title}
-                        </span>
-                      </p>
-
-                      <span className="shrink-0 text-[11px] text-[#949ba4]">
-                        {formatConversationTime(
-                          conversation.lastMessageAt
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <p className="truncate text-xs text-[#b5bac1]">
-                        {conversation.lastMessage?.text ||
-                          "No messages yet"}
-                      </p>
-
-                      {conversation.unreadCount > 0 && (
-                        <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-purple-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                          {conversation.unreadCount > 99
-                            ? "99+"
-                            : conversation.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                {section.items.map(renderConversationItem)}
+              </div>
+            ))}
           </div>
         </aside>
+
+        {isDesktopLayout && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize conversation list"
+            aria-valuemin={260}
+            aria-valuemax={520}
+            aria-valuenow={sidebarWidth}
+            tabIndex={0}
+            onPointerDown={onResizePointerDown}
+            onKeyDown={onResizeKeyDown}
+            className="relative z-10 hidden w-1 shrink-0 cursor-col-resize bg-transparent md:block"
+          >
+            <span className="absolute inset-y-0 -left-1 -right-1" />
+            <span
+              className={`absolute inset-y-0 left-0 w-px bg-white/10 transition ${
+                isResizing ? "bg-purple-400" : "hover:bg-purple-400/70"
+              }`}
+            />
+          </div>
+        )}
 
         {/* Main chat pane */}
         <section
@@ -1760,10 +2128,31 @@ const ChatPage = () => {
                     <FiArrowLeft className="h-5 w-5" />
                   </button>
 
+                  <button
+                    type="button"
+                    disabled={
+                      activeConversation?.type ===
+                      "direct"
+                    }
+                    onClick={toggleGroupPanel}
+                    className="flex min-w-0 items-center gap-3 rounded-xl text-left transition enabled:hover:bg-white/5"
+                  >
                   <div className="relative shrink-0">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-600/30 text-sm font-bold text-purple-100">
-                      {activeConversation?.type ===
-                      "direct" ? (
+                    <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-purple-600/30 text-sm font-bold text-purple-100">
+                      {activeConversation?.type !==
+                        "direct" &&
+                      activeConversation?.image ? (
+                        <img
+                          src={getUploadAbsoluteUrl(
+                            activeConversation.image
+                          )}
+                          alt={getConversationTitle(
+                            activeConversation
+                          )}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : activeConversation?.type ===
+                        "direct" ? (
                         getInitials(
                           getConversationTitle(
                             activeConversation
@@ -1807,9 +2196,10 @@ const ChatPage = () => {
                             } members`)}
                     </p>
                   </div>
+                  </button>
                 </div>
 
-                <div className="relative flex items-center gap-1">
+                <div className="relative flex shrink-0 items-center gap-1" ref={conversationMenuRef}>
                   <NotificationCenter
                     socket={socket}
                     unreadCount={notificationUnread}
@@ -1848,7 +2238,9 @@ const ChatPage = () => {
 
                   <button
                     type="button"
-                    aria-label="More options"
+                    aria-label="Conversation options"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
                     onClick={() =>
                       setMenuOpen((previous) => !previous)
                     }
@@ -1858,9 +2250,42 @@ const ChatPage = () => {
                   </button>
 
                   {menuOpen && (
-                    <div className="absolute right-0 top-11 z-20 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#1e1f22] shadow-xl">
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-11 z-20 w-56 overflow-hidden rounded-xl border border-white/10 bg-[#1e1f22] shadow-xl"
+                    >
+                      {activeConversation?.type !==
+                        "direct" && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setGroupPanelOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                        >
+                          <FiUsers className="h-4 w-4" />
+                          Group info
+                        </button>
+                      )}
+
                       <button
                         type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setShowSearch(true);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                      >
+                        <FiSearch className="h-4 w-4" />
+                        Search messages
+                      </button>
+
+                      <button
+                        type="button"
+                        role="menuitem"
                         onClick={handlePin}
                         className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
                       >
@@ -1872,6 +2297,7 @@ const ChatPage = () => {
 
                       <button
                         type="button"
+                        role="menuitem"
                         onClick={() => {
                           setMenuOpen(false);
                           loadPinned();
@@ -1882,14 +2308,71 @@ const ChatPage = () => {
                         Pinned messages
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setMenuOpen(false)}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
-                      >
-                        <FiX className="h-4 w-4" />
-                        Close menu
-                      </button>
+                      {activeConversation?.type ===
+                        "direct" && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setCallHistoryOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                        >
+                          <FiPhone className="h-4 w-4" />
+                          Call history
+                        </button>
+                      )}
+
+                      {activeConversation?.permissions?.canClear !==
+                        false && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={openClearChatConfirm}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                        >
+                          Clear chat for me
+                        </button>
+                      )}
+
+                      {activeConversation?.type === "direct" &&
+                        activeConversation?.permissions?.canHide !==
+                          false && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={openHideDirectConfirm}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-300 transition hover:bg-white/5"
+                          >
+                            Delete conversation
+                          </button>
+                        )}
+
+                      {activeConversation?.type !== "direct" &&
+                        activeConversation?.permissions?.canLeave && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={openLeaveGroupConfirm}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[#dbdee1] transition hover:bg-white/5"
+                          >
+                            Leave group
+                          </button>
+                        )}
+
+                      {activeConversation?.type !== "direct" &&
+                        activeConversation?.permissions
+                          ?.canDeleteGroup && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={openDeleteGroupConfirm}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-300 transition hover:bg-white/5"
+                          >
+                            Delete group
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
@@ -2022,10 +2505,27 @@ const ChatPage = () => {
                             activeConversation?.type !== "direct"
                           }
                           currentUserId={currentUserId}
+                          canSend={
+                            activeConversation?.permissions
+                              ?.canSend !== false
+                          }
+                          canManage={Boolean(
+                            activeConversation?.permissions
+                              ?.canManage
+                          )}
+                          isMember={
+                            activeConversation?.permissions
+                              ?.isMember !== false
+                          }
+                          userRole={user?.role}
+                          conversationType={
+                            activeConversation?.type || "direct"
+                          }
                           onReply={setReplyTo}
                           onReact={handleReact}
                           onEdit={(item) => {
                             setEditingMessage(item);
+                            setReplyTo(null);
                             setDraft(item.text || "");
                           }}
                           onDeleteMe={handleDeleteMe}
@@ -2053,21 +2553,39 @@ const ChatPage = () => {
                 ) : (
                   <div className="space-y-2">
                     {(replyTo || editingMessage) && (
-                      <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2 text-xs text-[#b5bac1]">
-                        <span>
-                          {editingMessage
-                            ? "Editing message"
-                            : `Replying to ${replyTo?.sender?.name || "message"}`}
-                          {!editingMessage && replyTo?.text
-                            ? `: ${replyTo.text}`
-                            : ""}
-                        </span>
+                      <div className="flex items-center justify-between gap-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-[#b5bac1]">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-white">
+                            {editingMessage
+                              ? "Editing message"
+                              : `Replying to ${
+                                  replyTo?.sender?.name || "message"
+                                }`}
+                          </p>
+                          {!editingMessage && (
+                            <p className="truncate">
+                              {replyTo?.text ||
+                                (replyTo?.attachments?.length
+                                  ? "Attachment"
+                                  : replyTo?.type === "voice"
+                                    ? "Voice note"
+                                    : "")}
+                            </p>
+                          )}
+                        </div>
                         <button
                           type="button"
+                          aria-label={
+                            editingMessage
+                              ? "Cancel edit"
+                              : "Cancel reply"
+                          }
                           onClick={() => {
                             setReplyTo(null);
-                            setEditingMessage(null);
-                            if (editingMessage) setDraft("");
+                            if (editingMessage) {
+                              setEditingMessage(null);
+                              setDraft("");
+                            }
                           }}
                         >
                           <FiX className="h-4 w-4" />
@@ -2084,7 +2602,7 @@ const ChatPage = () => {
                       </div>
                     )}
 
-                    <div className="flex items-end gap-2">
+                    <div className="flex min-w-0 items-end gap-2">
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -2093,87 +2611,93 @@ const ChatPage = () => {
                         onChange={handleAttachFiles}
                       />
 
-                      <button
-                        type="button"
-                        aria-label="Attach file"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
-                      >
-                        <FiPaperclip className="h-5 w-5" />
-                      </button>
-
-                      <div className="relative" ref={emojiPickerRef}>
+                      {!recordingVoice && (
                         <button
                           type="button"
-                          aria-label="Insert emoji"
-                          aria-expanded={emojiPickerOpen}
-                          onClick={() =>
-                            setEmojiPickerOpen((open) => !open)
-                          }
-                          className={`rounded-xl p-2 transition hover:bg-white/10 hover:text-white ${
-                            emojiPickerOpen
-                              ? "bg-white/10 text-white"
-                              : "text-[#b5bac1]"
-                          }`}
+                          aria-label="Attach file"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded-xl p-2 text-[#b5bac1] transition hover:bg-white/10 hover:text-white"
                         >
-                          <FiSmile className="h-5 w-5" />
+                          <FiPaperclip className="h-5 w-5" />
                         </button>
+                      )}
 
-                        {emojiPickerOpen && (
-                          <div className="absolute bottom-full left-0 z-50 mb-2 w-[min(100vw-2rem,22rem)]">
-                            <ChatEmojiPicker
-                              onSelect={insertComposerEmoji}
-                            />
-                          </div>
-                        )}
-                      </div>
+                      {!recordingVoice && (
+                        <div className="relative" ref={emojiPickerRef}>
+                          <button
+                            type="button"
+                            aria-label="Insert emoji"
+                            aria-expanded={emojiPickerOpen}
+                            onClick={() =>
+                              setEmojiPickerOpen((open) => !open)
+                            }
+                            className={`rounded-xl p-2 transition hover:bg-white/10 hover:text-white ${
+                              emojiPickerOpen
+                                ? "bg-white/10 text-white"
+                                : "text-[#b5bac1]"
+                            }`}
+                          >
+                            <FiSmile className="h-5 w-5" />
+                          </button>
+
+                          {emojiPickerOpen && (
+                            <div className="absolute bottom-full left-0 z-50 mb-2 w-[min(calc(100vw-2rem),22rem)] max-w-[calc(100vw-1rem)]">
+                              <ChatEmojiPicker
+                                onSelect={insertComposerEmoji}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       <VoiceRecorder
                         disabled={sending}
+                        onRecordingChange={setRecordingVoice}
                         onCancel={() => setRecordingVoice(false)}
                         onSend={handleVoiceSend}
                       />
 
-                      <textarea
-                        value={draft}
-                        onChange={(event) =>
-                          handleDraftChange(
-                            event.target.value
-                          )
-                        }
-                        onKeyDown={(event) => {
-                          if (
-                            event.key === "Enter" &&
-                            !event.shiftKey
-                          ) {
-                            event.preventDefault();
-                            handleSend();
+                      {!recordingVoice && (
+                        <textarea
+                          ref={composerRef}
+                          value={draft}
+                          onChange={(event) =>
+                            handleDraftChange(event.target.value)
                           }
-                        }}
-                        rows={1}
-                        placeholder={
-                          editingMessage
-                            ? "Edit message"
-                            : "Type a message"
-                        }
-                        className="max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-400"
-                      />
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Enter" &&
+                              !event.shiftKey
+                            ) {
+                              event.preventDefault();
+                              handleSend();
+                            }
+                          }}
+                          rows={1}
+                          placeholder={
+                            editingMessage
+                              ? "Edit message"
+                              : "Type a message"
+                          }
+                          className="max-h-32 min-h-[2.75rem] min-w-0 flex-1 resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-400"
+                        />
+                      )}
 
-                      <button
-                        type="button"
-                        aria-label="Send message"
-                        onClick={handleSend}
-                        disabled={
-                          !draft.trim() || sending
-                        }
-                        className="rounded-xl bg-purple-600 p-3 text-white transition hover:bg-purple-500 disabled:opacity-50"
-                      >
-                        {sending ? (
-                          <FiLoader className="h-5 w-5 animate-spin" />
-                        ) : (
-                          <FiSend className="h-5 w-5" />
-                        )}
-                      </button>
+                      {!recordingVoice && (
+                        <button
+                          type="button"
+                          aria-label="Send message"
+                          onClick={handleSend}
+                          disabled={!draft.trim() || sending}
+                          className="rounded-xl bg-purple-600 p-3 text-white transition hover:bg-purple-500 disabled:opacity-50"
+                        >
+                          {sending ? (
+                            <FiLoader className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <FiSend className="h-5 w-5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2181,6 +2705,39 @@ const ChatPage = () => {
             </>
           )}
         </section>
+
+        {groupPanelOpen &&
+        activeConversation &&
+        activeConversation.type !== "direct" ? (
+          <div className="fixed inset-0 z-40 bg-[#2b2d31] md:relative md:inset-auto md:z-auto md:w-80 md:shrink-0 lg:w-96">
+            <GroupDetailsPanel
+              conversation={activeConversation}
+              currentUserId={currentUserId}
+              onClose={() => setGroupPanelOpen(false)}
+              onConversationUpdated={handleGroupUpdated}
+              onLeaveGroup={() => {
+                setGroupPanelOpen(false);
+                openLeaveGroupConfirm();
+              }}
+              onDeleteGroup={() => {
+                setGroupPanelOpen(false);
+                openDeleteGroupConfirm();
+              }}
+            />
+          </div>
+        ) : null}
+
+        {callHistoryOpen &&
+        activeConversation &&
+        activeConversation.type === "direct" ? (
+          <div className="fixed inset-0 z-40 bg-[#2b2d31] md:relative md:inset-auto md:z-auto md:w-80 md:shrink-0 lg:w-96">
+            <CallHistoryPanel
+              conversationId={activeConversation.id}
+              currentUserId={currentUserId}
+              onClose={() => setCallHistoryOpen(false)}
+            />
+          </div>
+        ) : null}
       </div>
 
       {newChatOpen ? (
@@ -2201,41 +2758,101 @@ const ChatPage = () => {
       ) : null}
 
       {forwardTarget ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1e1f22] p-4 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-semibold text-white">
-                Forward message
-              </h3>
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 p-4 sm:items-center">
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl border border-white/10 bg-[#1e1f22] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-white">
+                  Forward message
+                </h3>
+                <p className="text-xs text-[#949ba4]">
+                  {forwardSelectedIds.length} selected
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setForwardTarget(null)}
+                aria-label="Close forward dialog"
+                onClick={() => {
+                  setForwardTarget(null);
+                  setForwardSelectedIds([]);
+                }}
               >
                 <FiX className="h-5 w-5 text-[#b5bac1]" />
               </button>
             </div>
-            <div className="max-h-80 space-y-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
               {conversations
                 .filter((item) => item.id !== conversationId)
-                .map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => confirmForward(item.id)}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-white/5"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600/30 text-xs font-bold text-purple-100">
-                      {getInitials(getConversationTitle(item))}
-                    </span>
-                    <span className="truncate text-sm text-white">
-                      {getConversationTitle(item)}
-                    </span>
-                  </button>
-                ))}
+                .map((item) => {
+                  const selected = forwardSelectedIds.includes(
+                    item.id
+                  );
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() =>
+                        toggleForwardSelection(item.id)
+                      }
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-white/5 ${
+                        selected ? "bg-purple-600/20" : ""
+                      }`}
+                    >
+                      <span
+                        className={`flex h-5 w-5 items-center justify-center rounded border ${
+                          selected
+                            ? "border-purple-400 bg-purple-500 text-white"
+                            : "border-white/20"
+                        }`}
+                      >
+                        {selected ? (
+                          <FiCheck className="h-3.5 w-3.5" />
+                        ) : null}
+                      </span>
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600/30 text-xs font-bold text-purple-100">
+                        {getInitials(getConversationTitle(item))}
+                      </span>
+                      <span className="min-w-0 truncate text-sm text-white">
+                        {getConversationTitle(item)}
+                      </span>
+                    </button>
+                  );
+                })}
             </div>
+            <button
+              type="button"
+              disabled={forwardSelectedIds.length === 0}
+              onClick={confirmForward}
+              className="mt-4 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Forward
+              {forwardSelectedIds.length > 0
+                ? ` (${forwardSelectedIds.length})`
+                : ""}
+            </button>
           </div>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(confirmAction)}
+        title={confirmAction?.title || ""}
+        description={confirmAction?.description || ""}
+        confirmLabel={confirmAction?.confirmLabel}
+        destructive={Boolean(confirmAction?.destructive)}
+        requireText={confirmAction?.requireText || null}
+        confirmText={confirmText}
+        onConfirmTextChange={setConfirmText}
+        busy={confirmBusy}
+        onCancel={() => {
+          if (!confirmBusy) {
+            setConfirmAction(null);
+            setConfirmText("");
+          }
+        }}
+        onConfirm={runConfirmAction}
+      />
 
       <CallOverlay
         call={activeCall}

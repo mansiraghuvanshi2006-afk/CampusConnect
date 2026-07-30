@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { emitWithAck } from "../socket/socketClient.js";
 
@@ -23,9 +23,13 @@ export default function useWebRTCCall({
   const screenStreamRef = useRef(null);
   const callIdRef = useRef(null);
 
-  const iceServers = activeCall?.iceServers || [
-    { urls: "stun:stun.l.google.com:19302" },
-  ];
+  const iceServers = useMemo(
+    () =>
+      activeCall?.iceServers || [
+        { urls: "stun:stun.l.google.com:19302" },
+      ],
+    [activeCall?.iceServers]
+  );
 
   const cleanupPeer = useCallback((userId) => {
     const peer = peersRef.current.get(userId);
@@ -161,7 +165,7 @@ export default function useWebRTCCall({
 
       return pc;
     },
-    [activeCall?.id, currentUserId, iceServers]
+    [activeCall, currentUserId, iceServers]
   );
 
   const startMediaForCall = useCallback(async () => {
@@ -334,7 +338,7 @@ export default function useWebRTCCall({
         muted: next,
       }).catch(() => {});
     }
-  }, [activeCall?.id, muted]);
+  }, [activeCall, muted]);
 
   const toggleCamera = useCallback(async () => {
     const next = !cameraOff;
@@ -351,7 +355,7 @@ export default function useWebRTCCall({
         cameraOff: next,
       }).catch(() => {});
     }
-  }, [activeCall?.id, cameraOff]);
+  }, [activeCall, cameraOff]);
 
   const switchCamera = useCallback(async () => {
     const videoTrack = localStreamRef.current?.getVideoTracks()?.[0];
@@ -450,7 +454,7 @@ export default function useWebRTCCall({
       callId: activeCall.id,
       screenSharing: true,
     }).catch(() => {});
-  }, [activeCall?.id, screenSharing]);
+  }, [activeCall, screenSharing]);
 
   return {
     localStream,

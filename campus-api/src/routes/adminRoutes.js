@@ -2,24 +2,33 @@ import express from "express";
 
 import {
   approveTeacher,
+  createAdminUser,
   deleteUserPermanently,
   getAdminDashboard,
   getAdminUserById,
   getAllUsers,
   getPendingTeachers,
   rejectTeacher,
+  resetAdminUserPassword,
   updateAdminUser,
   updateUserStatus,
 } from "../controllers/adminController.js";
 
 import authenticate from "../middleware/authenticate.js";
 import authorize from "../middleware/authorize.js";
+import requirePasswordChange from "../middleware/requirePasswordChange.js";
 import validateParams from "../middleware/validateParams.js";
 import validateRequest from "../middleware/validateRequest.js";
 
 import {
+  createUserSchema,
+  deleteUserSchema,
   rejectTeacherSchema,
+  resetUserPasswordSchema,
   teacherIdParamsSchema,
+  updateUserSchema,
+  updateUserStatusSchema,
+  userIdParamsSchema,
 } from "../validators/adminValidators.js";
 
 import { USER_ROLES } from "../models/User.js";
@@ -32,10 +41,12 @@ const router = express.Router();
 /**
  * Every admin route below requires:
  * 1. A valid authenticated user
- * 2. The admin role
+ * 2. No pending temporary-password change
+ * 3. The admin role
  */
 router.use(
   authenticate,
+  requirePasswordChange,
   authorize(USER_ROLES.ADMIN)
 );
 
@@ -91,12 +102,55 @@ router.get(
 );
 
 /**
+ * POST /api/v1/admin/users
+ *
+ * Creates a student, teacher or admin account directly.
+ *
+ * Body (student):
+ * {
+ *   "role": "student",
+ *   "name": "...",
+ *   "email": "...",
+ *   "temporaryPassword": "...",
+ *   "department": "<departmentId>",
+ *   "year": 1,
+ *   "isActive": true
+ * }
+ *
+ * Body (teacher):
+ * {
+ *   "role": "teacher",
+ *   "name": "...",
+ *   "email": "...",
+ *   "temporaryPassword": "...",
+ *   "department": "<departmentId>",
+ *   "teachingYears": [1, 2],
+ *   "isActive": true
+ * }
+ *
+ * Body (admin):
+ * {
+ *   "role": "admin",
+ *   "name": "...",
+ *   "email": "...",
+ *   "temporaryPassword": "...",
+ *   "isActive": true
+ * }
+ */
+router.post(
+  "/users",
+  validateRequest(createUserSchema),
+  createAdminUser
+);
+
+/**
  * GET /api/v1/admin/users/:id
  *
  * Returns one user.
  */
 router.get(
   "/users/:id",
+  validateParams(userIdParamsSchema),
   getAdminUserById
 );
 
@@ -110,7 +164,24 @@ router.get(
  */
 router.patch(
   "/users/:id/status",
+  validateParams(userIdParamsSchema),
+  validateRequest(updateUserStatusSchema),
   updateUserStatus
+);
+
+/**
+ * PATCH /api/v1/admin/users/:id/reset-password
+ *
+ * Body:
+ * {
+ *   "temporaryPassword": "..."
+ * }
+ */
+router.patch(
+  "/users/:id/reset-password",
+  validateParams(userIdParamsSchema),
+  validateRequest(resetUserPasswordSchema),
+  resetAdminUserPassword
 );
 
 /**
@@ -120,6 +191,8 @@ router.patch(
  */
 router.patch(
   "/users/:id",
+  validateParams(userIdParamsSchema),
+  validateRequest(updateUserSchema),
   updateAdminUser
 );
 
@@ -133,6 +206,8 @@ router.patch(
  */
 router.delete(
   "/users/:id",
+  validateParams(userIdParamsSchema),
+  validateRequest(deleteUserSchema),
   deleteUserPermanently
 );
 

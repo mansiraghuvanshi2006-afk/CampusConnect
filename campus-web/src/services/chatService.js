@@ -45,6 +45,117 @@ export const createGroup = async (payload) => {
   return response.data?.data;
 };
 
+/**
+ * Departments and academic years the current user may use
+ * when creating a group.
+ */
+export const getGroupScopeOptions = async () => {
+  const response = await api.get("/chat/group-scope-options");
+
+  return (
+    response.data?.data || {
+      departmentLocked: false,
+      departments: [],
+      academicYears: [],
+    }
+  );
+};
+
+/**
+ * Paginated, server-filtered list of users who may be added
+ * to a group.
+ */
+export const getGroupMemberOptions = async (params = {}) => {
+  const response = await api.get("/chat/group-member-options", {
+    params,
+  });
+
+  return (
+    response.data?.data || {
+      users: [],
+      pagination: {},
+    }
+  );
+};
+
+export const getGroups = async (params = {}) => {
+  const response = await api.get("/chat/groups", { params });
+
+  return (
+    response.data?.data || {
+      groups: [],
+      pagination: {},
+    }
+  );
+};
+
+export const getGroupMembers = async (conversationId) => {
+  const response = await api.get(
+    `/chat/conversations/${conversationId}/members`
+  );
+
+  return (
+    response.data?.data || {
+      group: null,
+      members: [],
+      memberCount: 0,
+    }
+  );
+};
+
+export const promoteGroupMember = async (
+  conversationId,
+  userId
+) => {
+  const response = await api.patch(
+    `/chat/conversations/${conversationId}/admins/${userId}/promote`
+  );
+
+  return response.data?.data;
+};
+
+export const demoteGroupMember = async (
+  conversationId,
+  userId
+) => {
+  const response = await api.patch(
+    `/chat/conversations/${conversationId}/admins/${userId}/demote`
+  );
+
+  return response.data?.data;
+};
+
+export const transferGroupOwnership = async (
+  conversationId,
+  userId
+) => {
+  const response = await api.patch(
+    `/chat/conversations/${conversationId}/owner/${userId}`
+  );
+
+  return response.data?.data;
+};
+
+/**
+ * Upload a group image and return its stored URL.
+ */
+export const uploadGroupImage = async (file) => {
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const response = await api.post(
+    "/chat/group-image",
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    }
+  );
+
+  return response.data?.data?.image || null;
+};
+
 export const getMessages = async (
   conversationId,
   params = {}
@@ -124,6 +235,38 @@ export const toggleConversationPin = async (
 ) => {
   const response = await api.patch(
     `/chat/conversations/${conversationId}/pin`
+  );
+
+  return response.data?.data?.conversation;
+};
+
+export const clearConversationForMe = async (conversationId) => {
+  const response = await api.post(
+    `/chat/conversations/${conversationId}/clear`
+  );
+
+  return response.data?.data?.conversation;
+};
+
+export const hideConversationForMe = async (conversationId) => {
+  const response = await api.delete(
+    `/chat/conversations/${conversationId}/for-me`
+  );
+
+  return response.data?.data?.conversation;
+};
+
+export const leaveConversation = async (conversationId) => {
+  const response = await api.post(
+    `/chat/conversations/${conversationId}/leave`
+  );
+
+  return response.data?.data;
+};
+
+export const deleteGroupConversation = async (conversationId) => {
+  const response = await api.delete(
+    `/chat/conversations/${conversationId}`
   );
 
   return response.data?.data?.conversation;
@@ -299,6 +442,34 @@ export const getActiveCall = async (conversationId) => {
   );
 
   return response.data?.data?.call || null;
+};
+
+export const listCalls = async (params = {}) => {
+  const response = await api.get("/chat/calls", { params });
+
+  return (
+    response.data?.data || {
+      calls: [],
+      pagination: {},
+    }
+  );
+};
+
+export const listConversationCalls = async (
+  conversationId,
+  params = {}
+) => {
+  const response = await api.get(
+    `/chat/conversations/${conversationId}/calls`,
+    { params }
+  );
+
+  return (
+    response.data?.data || {
+      calls: [],
+      pagination: {},
+    }
+  );
 };
 
 export const getUploadAbsoluteUrl = (url) => {

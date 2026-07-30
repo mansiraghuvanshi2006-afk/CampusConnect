@@ -329,6 +329,11 @@ export const formatConversation = (
 
       return {
         ...formatSafeUser(userDoc, onlineUserIds),
+        /*
+          `role` carries the conversation role, so the platform
+          role stays available under `userRole`.
+        */
+        userRole: userDoc.role || null,
         role: member.role,
         joinedAt: member.joinedAt,
         unreadCount: member.unreadCount || 0,
@@ -348,7 +353,7 @@ export const formatConversation = (
     displayName = partner?.name || "Direct chat";
   }
 
-  const lastMessage = conversation.lastMessage
+  const lastMessageRaw = conversation.lastMessage
     ? typeof conversation.lastMessage === "object" &&
       conversation.lastMessage.text !== undefined
       ? formatMessage(conversation.lastMessage, {
@@ -365,15 +370,55 @@ export const formatConversation = (
         : { id: toId(conversation.lastMessage) }
     : null;
 
+  const clearedAt = membership?.clearedAt
+    ? new Date(membership.clearedAt)
+    : null;
+
+  const lastMessage =
+    lastMessageRaw &&
+    clearedAt &&
+    lastMessageRaw.createdAt &&
+    new Date(lastMessageRaw.createdAt).getTime() <=
+      clearedAt.getTime()
+      ? null
+      : lastMessageRaw;
+
+  const ownerId =
+    toId(conversation.owner) ||
+    (conversation.type !== "direct"
+      ? toId(conversation.createdBy)
+      : null);
+
   return {
     id: toId(conversation),
     type: conversation.type,
+    groupType: conversation.groupType || null,
     name: displayName,
     description: conversation.description || null,
     image: conversation.image || null,
     members: activeMembers,
     memberCount: activeMembers.length,
+    adminCount: activeMembers.filter(
+      (member) => member.role === "admin"
+    ).length,
     createdBy: toId(conversation.createdBy),
+    creator:
+      conversation.createdBy &&
+      typeof conversation.createdBy === "object" &&
+      conversation.createdBy.name
+        ? {
+            id: toId(conversation.createdBy),
+            name: conversation.createdBy.name,
+            role: conversation.createdBy.role,
+          }
+        : activeMembers.find(
+            (member) =>
+              member.id === toId(conversation.createdBy)
+          ) || null,
+    owner: ownerId,
+    ownerDetails:
+      activeMembers.find((member) => member.id === ownerId) ||
+      null,
     department: conversation.department
       ? {
           id: toId(conversation.department),
@@ -383,11 +428,20 @@ export const formatConversation = (
       : null,
     academicYears: conversation.academicYears || [],
     lastMessage,
-    lastMessageAt: conversation.lastMessageAt || null,
+    lastMessageAt:
+      lastMessage && conversation.lastMessageAt
+        ? conversation.lastMessageAt
+        : lastMessage
+          ? lastMessage.createdAt
+          : clearedAt
+            ? null
+            : conversation.lastMessageAt || null,
     onlyAdminsCanSend: Boolean(conversation.onlyAdminsCanSend),
     isActive: conversation.isActive,
     unreadCount: membership?.unreadCount || 0,
     isPinned: Boolean(membership?.isPinned),
+    clearedAt: membership?.clearedAt || null,
+    hiddenAt: membership?.hiddenAt || null,
     partner,
     partnerOnline: partner
       ? onlineUserIds.has(partner.id)

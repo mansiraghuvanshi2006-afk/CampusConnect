@@ -479,4 +479,114 @@ describe("Phase 5 advanced messaging", () => {
     expect(rejected.call.status).toBe("rejected");
     expect(rejected.call.isActive).toBe(false);
   });
+
+  it("lists call history only for participants and omits ICE servers", async () => {
+    const department = new mongoose.Types.ObjectId();
+    const alice = await createStudent({
+      email: "alice.history@test.com",
+      department,
+    });
+    const bob = await createStudent({
+      email: "bob.history@test.com",
+      department,
+    });
+    const eve = await createStudent({
+      email: "eve.history@test.com",
+      department,
+    });
+
+    const { conversation } =
+      await chatService.createOrGetDirectConversation(
+        alice,
+        bob._id
+      );
+
+    const started = await callService.startCall(
+      alice,
+      conversation.id,
+      { type: "audio" }
+    );
+
+    await callService.acceptCall(bob, started.id);
+    await callService.endCall(alice, started.id);
+
+    const aliceHistory = await callService.listCallsForUser(
+      alice,
+      { conversationId: conversation.id }
+    );
+
+    expect(aliceHistory.calls).toHaveLength(1);
+    expect(aliceHistory.calls[0].iceServers).toBeUndefined();
+    expect(aliceHistory.calls[0].status).toBe("ended");
+    expect(aliceHistory.calls[0].caller.id).toBe(
+      alice._id.toString()
+    );
+
+    const eveHistory = await callService.listCallsForUser(eve, {});
+
+    expect(eveHistory.calls).toHaveLength(0);
+
+    await expect(
+      callService.getCallById(eve, started.id)
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  it("rejects WebRTC signal targets outside the call", async () => {
+    const department = new mongoose.Types.ObjectId();
+    const alice = await createStudent({
+      email: "alice.signal.unit@test.com",
+      department,
+    });
+    const bob = await createStudent({
+      email: "bob.signal.unit@test.com",
+      department,
+    });
+    const eve = await createStudent({
+      email: "eve.signal.unit@test.com",
+      department,
+    });
+
+    const { conversation } =
+      await chatService.createOrGetDirectConversation(
+        alice,
+        bob._id
+      );
+
+    const started = await callService.startCall(
+      alice,
+      conversation.id,
+      { type: "audio" }
+    );
+
+    const call = await callService.assertCallParticipant(
+      alice._id,
+      started.id
+    );
+
+    expect(() =>
+      callService.assertCallSignalPermission({
+        call,
+        actorUserId: alice._id,
+        targetUserId: eve._id,
+      })
+    ).toThrow(/not a participant/i);
+
+    expect(() =>
+      callService.assertCallSignalPermission({
+        call,
+        actorUserId: alice._id,
+        targetUserId: alice._id,
+      })
+    ).toThrow(/yourself/i);
+
+    const allowed = callService.assertCallSignalPermission({
+      call,
+      actorUserId: alice._id,
+      targetUserId: bob._id,
+    });
+
+    expect(allowed.targetId).toBe(bob._id.toString());
+  });
 });

@@ -112,3 +112,44 @@
     );
   }
 }
+
+/* Light theme — minimal override; dark remains default */
+html.theme-light body {
+  background:
+    radial-gradient(
+      circle at 15% 15%,
+      rgba(88, 101, 242, 0.08),
+      transparent 30%
+    ),
+    linear-gradient(180deg, #f4f5f7 0%, #e8eaf0 100%);
+  color: #1e1f22;
+}
+
+/* Global overflow / mobile safety */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.min-w-0-safe {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

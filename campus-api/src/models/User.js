@@ -272,6 +272,195 @@ const userSchema =
         type: Date,
         default: null,
       },
+
+      /*
+        Incremented on logout-all-devices so existing
+        access tokens become invalid immediately.
+      */
+      tokenVersion: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      /* ---------- Phase 8 profile fields ---------- */
+
+      bio: {
+        type: String,
+        trim: true,
+        maxlength: [
+          500,
+          "Bio cannot exceed 500 characters",
+        ],
+        default: "",
+      },
+
+      phone: {
+        type: String,
+        trim: true,
+        maxlength: [
+          30,
+          "Phone cannot exceed 30 characters",
+        ],
+        default: "",
+      },
+
+      dob: {
+        type: Date,
+        default: null,
+      },
+
+      gender: {
+        type: String,
+        enum: {
+          values: [
+            "male",
+            "female",
+            "other",
+            "prefer_not_to_say",
+            "",
+            null,
+          ],
+          message: "Invalid gender",
+        },
+        default: "",
+      },
+
+      address: {
+        type: String,
+        trim: true,
+        maxlength: [
+          300,
+          "Address cannot exceed 300 characters",
+        ],
+        default: "",
+      },
+
+      avatarUrl: {
+        type: String,
+        trim: true,
+        maxlength: 500,
+        default: null,
+      },
+
+      socialLinks: {
+        linkedin: {
+          type: String,
+          trim: true,
+          maxlength: 300,
+          default: "",
+        },
+        github: {
+          type: String,
+          trim: true,
+          maxlength: 300,
+          default: "",
+        },
+        twitter: {
+          type: String,
+          trim: true,
+          maxlength: 300,
+          default: "",
+        },
+        website: {
+          type: String,
+          trim: true,
+          maxlength: 300,
+          default: "",
+        },
+      },
+
+      /* Teacher-only profile fields */
+      qualification: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: "",
+      },
+
+      experience: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: "",
+      },
+
+      specialization: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: "",
+      },
+
+      office: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: "",
+      },
+
+      /* Admin-only profile field */
+      designation: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: "",
+      },
+
+      /*
+        Account preferences (theme, notifications,
+        privacy, language). Defaults preserve the
+        existing dark Discord-like design.
+      */
+      settings: {
+        theme: {
+          type: String,
+          enum: ["dark", "light", "system"],
+          default: "dark",
+        },
+        language: {
+          type: String,
+          trim: true,
+          maxlength: 20,
+          default: "en",
+        },
+        notifications: {
+          chatMessages: {
+            type: Boolean,
+            default: true,
+          },
+          groupUpdates: {
+            type: Boolean,
+            default: true,
+          },
+          callAlerts: {
+            type: Boolean,
+            default: true,
+          },
+          aiUpdates: {
+            type: Boolean,
+            default: true,
+          },
+          emailDigest: {
+            type: Boolean,
+            default: false,
+          },
+        },
+        privacy: {
+          showOnlineStatus: {
+            type: Boolean,
+            default: true,
+          },
+          showLastSeen: {
+            type: Boolean,
+            default: true,
+          },
+          showProfileToCampus: {
+            type: Boolean,
+            default: true,
+          },
+        },
+      },
     },
     {
       timestamps: true,
@@ -575,6 +764,8 @@ userSchema.methods.toJSON =
 
     delete user
       .emailVerificationExpiresAt;
+
+    delete user.tokenVersion;
 
     return user;
   };

@@ -23,6 +23,7 @@ export const generateAccessToken = (user) => {
       userId: user._id.toString(),
       role: user.role,
       tokenType: "access",
+      tokenVersion: Number(user.tokenVersion) || 0,
     },
     getRequiredEnvironmentVariable("JWT_ACCESS_SECRET"),
     {

@@ -7,6 +7,63 @@ import Department from "../models/Department.js";
 
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { sendSuccess } from "../utils/apiResponse.js";
+import {
+  assertCanEditSelfProfile,
+  deleteMyAvatar,
+  getMyProfile,
+  updateMyAvatar,
+  updateMyProfile,
+} from "../services/profileService.js";
+import { validateUploadedFiles } from "../middleware/uploadMiddleware.js";
+
+/**
+ * GET /api/v1/profile/me
+ */
+export const getMe = asyncHandler(async (req, res) => {
+  const profile = await getMyProfile(req.user._id);
+
+  return sendSuccess(res, 200, "Profile loaded", { profile });
+});
+
+/**
+ * PATCH /api/v1/profile/me
+ */
+export const updateMe = asyncHandler(async (req, res) => {
+  assertCanEditSelfProfile(req.user);
+
+  const profile = await updateMyProfile(req.user, req.body);
+
+  return sendSuccess(res, 200, "Profile updated", { profile });
+});
+
+/**
+ * POST /api/v1/profile/me/avatar
+ */
+export const uploadAvatar = asyncHandler(async (req, res) => {
+  assertCanEditSelfProfile(req.user);
+
+  if (!req.file) {
+    throw new ApiError(400, "Profile photo is required");
+  }
+
+  validateUploadedFiles([req.file]);
+
+  const profile = await updateMyAvatar(req.user, req.file.filename);
+
+  return sendSuccess(res, 200, "Profile photo updated", { profile });
+});
+
+/**
+ * DELETE /api/v1/profile/me/avatar
+ */
+export const removeAvatar = asyncHandler(async (req, res) => {
+  assertCanEditSelfProfile(req.user);
+
+  const profile = await deleteMyAvatar(req.user);
+
+  return sendSuccess(res, 200, "Profile photo removed", { profile });
+});
 
 const getPublicProfile = (user) => ({
   id: user._id.toString(),

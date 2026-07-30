@@ -67,11 +67,11 @@ const ConfirmDialog = ({
       }}
     >
       <div
-        role="alertdialog"
+        role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-desc"
-        className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1e1f22] p-5 shadow-2xl"
+        className="max-h-[min(90dvh,40rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-[#1e1f22] p-5 shadow-2xl"
       >
         <h2
           id="confirm-dialog-title"

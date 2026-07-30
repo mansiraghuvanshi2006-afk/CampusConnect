@@ -17,6 +17,11 @@ import {
 import {
   ACCESS_TOKEN_KEY,
 } from "../services/api.js";
+import {
+  applyTheme,
+  getStoredTheme,
+  storeTheme,
+} from "../utils/theme.js";
 
 export const AuthContext =
   createContext(null);
@@ -212,6 +217,17 @@ export const AuthProvider = ({
 
     return () => window.clearTimeout(timeoutId);
   }, [loadCurrentUser]);
+
+  /**
+   * Apply theme from user settings or local storage.
+   * Dark remains the default CampusConnect look.
+   */
+  useEffect(() => {
+    const theme =
+      user?.settings?.theme || getStoredTheme();
+    storeTheme(theme);
+    applyTheme(theme);
+  }, [user?.settings?.theme]);
 
   /**
    * Automatically log the user out when the API

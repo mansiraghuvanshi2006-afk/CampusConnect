@@ -9,21 +9,32 @@ const ACCESS_TOKEN_KEY = "campus_connect_access_token";
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
-  headers: {
-    "Content-Type": "application/json",
-  },
   timeout: 15000,
 });
 
 api.interceptors.request.use(
   (config) => {
-    const accessToken = localStorage.getItem(
-      ACCESS_TOKEN_KEY
-    );
+    const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+
+    config.headers = config.headers || {};
 
     if (accessToken) {
-      config.headers.Authorization =
-        `Bearer ${accessToken}`;
+      config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    // Let the browser set multipart boundaries for FormData.
+    if (config.data instanceof FormData) {
+      if (typeof config.headers.set === "function") {
+        config.headers.delete("Content-Type");
+      } else {
+        delete config.headers["Content-Type"];
+      }
+    } else if (
+      config.data &&
+      typeof config.data === "object" &&
+      !config.headers["Content-Type"]
+    ) {
+      config.headers["Content-Type"] = "application/json";
     }
 
     return config;
@@ -32,6 +43,7 @@ api.interceptors.request.use(
 );
 
 let refreshPromise = null;
+let unauthorizedDispatched = false;
 
 const refreshAccessToken = async () => {
   if (!refreshPromise) {
@@ -44,19 +56,14 @@ const refreshAccessToken = async () => {
         }
       )
       .then((response) => {
-        const newAccessToken =
-          response.data?.data?.accessToken;
+        const newAccessToken = response.data?.data?.accessToken;
 
         if (!newAccessToken) {
-          throw new Error(
-            "Access token was not returned"
-          );
+          throw new Error("Access token was not returned");
         }
 
-        localStorage.setItem(
-          ACCESS_TOKEN_KEY,
-          newAccessToken
-        );
+        localStorage.setItem(ACCESS_TOKEN_KEY, newAccessToken);
+        unauthorizedDispatched = false;
 
         window.dispatchEvent(
           new CustomEvent("auth:token-refreshed", {
@@ -67,6 +74,16 @@ const refreshAccessToken = async () => {
         );
 
         return newAccessToken;
+      })
+      .catch((error) => {
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+
+        if (!unauthorizedDispatched) {
+          unauthorizedDispatched = true;
+          window.dispatchEvent(new Event("auth:unauthorized"));
+        }
+
+        throw error;
       })
       .finally(() => {
         refreshPromise = null;
@@ -82,37 +99,36 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    const isUnauthorized =
-      error.response?.status === 401;
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
 
-    const isRefreshRequest =
-      originalRequest?.url?.includes(
-        "/auth/refresh"
-      );
+    if (axios.isCancel?.(error) || error.code === "ERR_CANCELED") {
+      return Promise.reject(error);
+    }
+
+    const isUnauthorized = error.response?.status === 401;
+
+    const isRefreshRequest = String(originalRequest.url || "").includes(
+      "/auth/refresh"
+    );
 
     if (
       isUnauthorized &&
-      !originalRequest?._retry &&
+      !originalRequest._retry &&
       !isRefreshRequest
     ) {
       originalRequest._retry = true;
 
       try {
-        const newAccessToken =
-          await refreshAccessToken();
+        const newAccessToken = await refreshAccessToken();
 
-        originalRequest.headers.Authorization =
-          `Bearer ${newAccessToken}`;
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
 
         return api(originalRequest);
-      } catch {
-        localStorage.removeItem(
-          ACCESS_TOKEN_KEY
-        );
-
-        window.dispatchEvent(
-          new Event("auth:unauthorized")
-        );
+      } catch (refreshError) {
+        return Promise.reject(refreshError);
       }
     }
 

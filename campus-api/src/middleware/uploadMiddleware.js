@@ -22,9 +22,12 @@ export const GROUP_IMAGE_UPLOAD_DIR = path.join(
   "groups"
 );
 
+export const AVATAR_UPLOAD_DIR = path.join(UPLOAD_ROOT, "avatars");
+
 const ensureDirs = () => {
   fs.mkdirSync(CHAT_UPLOAD_DIR, { recursive: true });
   fs.mkdirSync(GROUP_IMAGE_UPLOAD_DIR, { recursive: true });
+  fs.mkdirSync(AVATAR_UPLOAD_DIR, { recursive: true });
 };
 
 ensureDirs();
@@ -215,4 +218,69 @@ export const removeGroupImageFile = (imageUrl) => {
   fs.promises.unlink(absolutePath).catch(() => {
     // A missing file is not an error for the caller.
   });
+};
+
+export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+const AVATAR_MIME_TYPES = Object.freeze([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    ensureDirs();
+    cb(null, AVATAR_UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const ext =
+      ALLOWED_MIME_TYPES[file.mimetype]?.ext ||
+      path.extname(file.originalname).toLowerCase() ||
+      ".jpg";
+
+    cb(null, `${Date.now()}-${randomUUID()}${ext}`);
+  },
+});
+
+export const avatarUpload = multer({
+  storage: avatarStorage,
+  fileFilter: (_req, file, cb) => {
+    if (!AVATAR_MIME_TYPES.includes(file.mimetype)) {
+      cb(
+        new ApiError(
+          400,
+          "Profile photos must be a JPG, PNG or WEBP file"
+        )
+      );
+      return;
+    }
+
+    cb(null, true);
+  },
+  limits: {
+    fileSize: AVATAR_MAX_BYTES,
+    files: 1,
+  },
+});
+
+export const buildAvatarUrl = (fileName) =>
+  `/uploads/avatars/${fileName}`;
+
+export const removeAvatarFile = (imageUrl) => {
+  if (
+    typeof imageUrl !== "string" ||
+    !imageUrl.startsWith("/uploads/avatars/")
+  ) {
+    return;
+  }
+
+  const fileName = path.basename(imageUrl);
+  const absolutePath = path.join(AVATAR_UPLOAD_DIR, fileName);
+
+  if (!absolutePath.startsWith(AVATAR_UPLOAD_DIR)) {
+    return;
+  }
+
+  fs.promises.unlink(absolutePath).catch(() => {});
 };

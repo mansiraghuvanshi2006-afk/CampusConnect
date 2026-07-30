@@ -45,6 +45,17 @@ const socketAuth = async (socket, next) => {
       return next(new Error("User not found"));
     }
 
+    const tokenVersion = Number(payload.tokenVersion) || 0;
+    const currentVersion = Number(user.tokenVersion) || 0;
+
+    if (tokenVersion !== currentVersion) {
+      return next(
+        new Error(
+          "Access token has been revoked. Please sign in again"
+        )
+      );
+    }
+
     if (user.mustChangePassword) {
       return next(
         new Error(

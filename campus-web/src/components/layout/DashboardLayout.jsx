@@ -20,6 +20,21 @@ const roleNavigation = {
       to: "/student/chat",
       end: false,
     },
+    {
+      label: "Campus AI",
+      to: "/student/ai",
+      end: false,
+    },
+    {
+      label: "My Profile",
+      to: "/student/profile",
+      end: true,
+    },
+    {
+      label: "Settings",
+      to: "/student/settings",
+      end: true,
+    },
   ],
 
   teacher: [
@@ -33,6 +48,21 @@ const roleNavigation = {
       to: "/teacher/chat",
       end: false,
     },
+    {
+      label: "Campus AI",
+      to: "/teacher/ai",
+      end: false,
+    },
+    {
+      label: "My Profile",
+      to: "/teacher/profile",
+      end: true,
+    },
+    {
+      label: "Settings",
+      to: "/teacher/settings",
+      end: true,
+    },
   ],
 
   admin: [
@@ -45,6 +75,21 @@ const roleNavigation = {
       label: "Chat",
       to: "/admin/chat",
       end: false,
+    },
+    {
+      label: "Campus AI",
+      to: "/admin/ai",
+      end: false,
+    },
+    {
+      label: "My Profile",
+      to: "/admin/profile",
+      end: true,
+    },
+    {
+      label: "Settings",
+      to: "/admin/settings",
+      end: true,
     },
     {
       label: "Departments",
@@ -124,10 +169,10 @@ const DashboardLayout = ({
     }`;
 
   return (
-    <div className="min-h-screen bg-[#313338] text-white">
-      {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-white/10 bg-[#2b2d31] lg:flex lg:flex-col">
-        <div className="border-b border-white/10 px-6 py-6">
+    <div className="min-h-dvh overflow-x-hidden bg-[#313338] text-white">
+      {/* Desktop sidebar — nav scrolls; logout stays pinned */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden h-dvh w-64 flex-col overflow-hidden border-r border-white/10 bg-[#2b2d31] lg:flex">
+        <div className="shrink-0 border-b border-white/10 px-6 py-6">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">
             CampusConnect
           </p>
@@ -139,7 +184,7 @@ const DashboardLayout = ({
           </h2>
         </div>
 
-        <nav className="flex-1 space-y-2 p-4">
+        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
           {navigation.map((item) => (
             <NavLink
               key={item.to}
@@ -154,9 +199,9 @@ const DashboardLayout = ({
           ))}
         </nav>
 
-        <div className="border-t border-white/10 p-4">
+        <div className="shrink-0 border-t border-white/10 bg-[#2b2d31] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="mb-4 rounded-xl bg-black/20 p-4">
-            <p className="font-semibold">
+            <p className="truncate font-semibold">
               {user?.name ||
                 "CampusConnect User"}
             </p>
@@ -211,7 +256,7 @@ const DashboardLayout = ({
 
           {/* Mobile navigation */}
           <nav className="overflow-x-auto border-t border-white/10 px-4 py-3 sm:px-6 lg:hidden">
-            <div className="flex min-w-max gap-2">
+            <div className="flex min-w-max gap-2 pb-1">
               {navigation.map((item) => (
                 <NavLink
                   key={item.to}
@@ -220,7 +265,7 @@ const DashboardLayout = ({
                   className={({
                     isActive,
                   }) =>
-                    `rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    `min-h-11 rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-400 ${
                       isActive
                         ? "bg-purple-600 text-white"
                         : "bg-white/5 text-[#b5bac1] hover:bg-white/10 hover:text-white"

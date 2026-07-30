@@ -33,6 +33,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { MdOutlinePushPin } from "react-icons/md";
+import { HiSparkles } from "react-icons/hi2";
 
 import DashboardLayout from "../../components/layout/DashboardLayout.jsx";
 import NewChatModal from "../../components/chat/NewChatModal.jsx";
@@ -45,6 +46,7 @@ import ChatEmojiPicker from "../../components/chat/ChatEmojiPicker.jsx";
 import CallOverlay from "../../components/chat/CallOverlay.jsx";
 import NotificationCenter from "../../components/chat/NotificationCenter.jsx";
 import ConfirmDialog from "../../components/chat/ConfirmDialog.jsx";
+import ConversationListItem from "../../components/chat/ConversationListItem.jsx";
 
 import { useAuth } from "../../context/AuthContext.jsx";
 import useSocket from "../../socket/useSocket.js";
@@ -126,6 +128,7 @@ const ChatPage = () => {
 
   const currentUserId = getUserId(user);
   const chatBasePath = `/${user?.role}/chat`;
+  const aiPath = `/${user?.role}/ai`;
 
   const [conversations, setConversations] = useState([]);
   const [loadingConversations, setLoadingConversations] =
@@ -1875,7 +1878,6 @@ const ChatPage = () => {
   }, [messages, currentUserId]);
 
   const renderConversationItem = (conversation) => {
-    const title = getConversationTitle(conversation);
     const isActive = conversation.id === conversationId;
     const isGroup = conversation.type !== "direct";
     const online =
@@ -1884,71 +1886,13 @@ const ChatPage = () => {
         : false;
 
     return (
-      <button
+      <ConversationListItem
         key={conversation.id}
-        type="button"
-        onClick={() => openConversation(conversation.id)}
-        className={`flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left transition ${
-          isActive
-            ? "bg-purple-600/20"
-            : "hover:bg-white/5"
-        }`}
-      >
-        <div className="relative shrink-0">
-          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-purple-600/30 text-sm font-bold text-purple-100">
-            {isGroup && conversation.image ? (
-              <img
-                src={getUploadAbsoluteUrl(
-                  conversation.image
-                )}
-                alt={title}
-                className="h-full w-full object-cover"
-              />
-            ) : isGroup ? (
-              <FiUsers className="h-5 w-5" />
-            ) : (
-              getInitials(title)
-            )}
-          </div>
-
-          {online && (
-            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#2b2d31] bg-emerald-400" />
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="flex min-w-0 items-center gap-1 truncate font-semibold text-white">
-              {conversation.isPinned && (
-                <MdOutlinePushPin className="h-3.5 w-3.5 shrink-0 text-purple-300" />
-              )}
-
-              <span className="truncate">{title}</span>
-            </p>
-
-            <span className="shrink-0 text-[11px] text-[#949ba4]">
-              {formatConversationTime(
-                conversation.lastMessageAt
-              )}
-            </span>
-          </div>
-
-          <div className="mt-1 flex items-center justify-between gap-2">
-            <p className="truncate text-xs text-[#b5bac1]">
-              {conversation.lastMessage?.text ||
-                "No messages yet"}
-            </p>
-
-            {conversation.unreadCount > 0 && (
-              <span className="inline-flex min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-purple-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                {conversation.unreadCount > 99
-                  ? "99+"
-                  : conversation.unreadCount}
-              </span>
-            )}
-          </div>
-        </div>
-      </button>
+        conversation={conversation}
+        isActive={isActive}
+        online={online}
+        onOpen={openConversation}
+      />
     );
   };
 
@@ -2037,6 +1981,29 @@ const ChatPage = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto">
+            <div>
+              <p className="sticky top-0 z-10 bg-[#2b2d31]/95 px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-[#949ba4] backdrop-blur">
+                Campus AI
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate(aiPath)}
+                className="flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/5"
+              >
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-purple-600/30 text-purple-100">
+                  <HiSparkles className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-white">
+                    Campus AI
+                  </p>
+                  <p className="mt-1 truncate text-xs text-[#b5bac1]">
+                    Ask anything · campus data · live info
+                  </p>
+                </div>
+              </button>
+            </div>
+
             {loadingConversations && (
               <div className="flex items-center justify-center gap-2 py-12 text-sm text-[#b5bac1]">
                 <FiLoader className="h-4 w-4 animate-spin" />

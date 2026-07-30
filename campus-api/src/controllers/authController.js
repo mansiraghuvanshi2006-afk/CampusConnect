@@ -53,6 +53,12 @@ const getPublicUser = (user) => ({
     user.teachingYears || [],
   profileCompleted:
     user.profileCompleted,
+  avatarUrl: user.avatarUrl || null,
+  bio: user.bio || "",
+  settings: {
+    theme: user.settings?.theme || "dark",
+    language: user.settings?.language || "en",
+  },
 
   // Authentication fields
   isEmailVerified:
@@ -595,6 +601,15 @@ export const logoutAllDevices = asyncHandler(
   async (req, res) => {
     await Session.deleteMany({
       user: req.user._id,
+    });
+
+    /*
+      Bump tokenVersion so existing access tokens
+      fail authenticate immediately (not only at
+      refresh-token expiry).
+    */
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { tokenVersion: 1 },
     });
 
     clearRefreshTokenCookie(res);

@@ -65,6 +65,18 @@ const ChatPage = lazy(
   () => import("../pages/chat/ChatPage.jsx")
 );
 
+const CampusAiPage = lazy(
+  () => import("../pages/ai/CampusAiPage.jsx")
+);
+
+const ProfilePage = lazy(
+  () => import("../pages/profile/ProfilePage.jsx")
+);
+
+const SettingsPage = lazy(
+  () => import("../pages/settings/SettingsPage.jsx")
+);
+
 const RouteFallback = () => (
   <div
     className="flex min-h-[50vh] items-center justify-center bg-[#313338] text-sm text-[#b5bac1]"
@@ -176,6 +188,26 @@ const AppRoutes = () => {
           path="/student/chat/:conversationId"
           element={<ChatPage />}
         />
+
+        <Route
+          path="/student/ai"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/student/ai/:conversationId"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/student/profile"
+          element={<ProfilePage />}
+        />
+
+        <Route
+          path="/student/settings"
+          element={<SettingsPage />}
+        />
       </Route>
 
       {/* Teacher routes */}
@@ -215,6 +247,26 @@ const AppRoutes = () => {
           path="/teacher/chat/:conversationId"
           element={<ChatPage />}
         />
+
+        <Route
+          path="/teacher/ai"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/teacher/ai/:conversationId"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/teacher/profile"
+          element={<ProfilePage />}
+        />
+
+        <Route
+          path="/teacher/settings"
+          element={<SettingsPage />}
+        />
       </Route>
 
       {/* Admin routes */}
@@ -253,6 +305,26 @@ const AppRoutes = () => {
         <Route
           path="/admin/chat/:conversationId"
           element={<ChatPage />}
+        />
+
+        <Route
+          path="/admin/ai"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/admin/ai/:conversationId"
+          element={<CampusAiPage />}
+        />
+
+        <Route
+          path="/admin/profile"
+          element={<ProfilePage />}
+        />
+
+        <Route
+          path="/admin/settings"
+          element={<SettingsPage />}
         />
       </Route>
 

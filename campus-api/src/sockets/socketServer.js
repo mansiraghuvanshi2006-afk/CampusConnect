@@ -25,6 +25,7 @@ import {
 } from "./handlers/advancedChatSocketHandler.js";
 
 import { createSocketRateLimiter } from "./socketHelpers.js";
+import { socketCorsOrigin } from "../utils/corsOrigins.js";
 
 import {
   emitPresenceToAuthorizedUsers,
@@ -40,9 +41,7 @@ export const initializeSocketServer = (httpServer) => {
   return import("socket.io").then(({ Server }) => {
     const io = new Server(httpServer, {
       cors: {
-        origin:
-          process.env.CLIENT_URL ||
-          "http://localhost:5173",
+        origin: socketCorsOrigin,
         credentials: true,
         methods: ["GET", "POST"],
       },

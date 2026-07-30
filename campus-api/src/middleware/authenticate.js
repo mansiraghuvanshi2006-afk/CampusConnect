@@ -43,6 +43,16 @@ const authenticate = asyncHandler(async (req, res, next) => {
     );
   }
 
+  const tokenVersion = Number(payload.tokenVersion) || 0;
+  const currentVersion = Number(user.tokenVersion) || 0;
+
+  if (tokenVersion !== currentVersion) {
+    throw new ApiError(
+      401,
+      "Access token has been revoked. Please sign in again"
+    );
+  }
+
   const isLimitedTeacher =
     user.role === USER_ROLES.TEACHER &&
     user.isEmailVerified &&

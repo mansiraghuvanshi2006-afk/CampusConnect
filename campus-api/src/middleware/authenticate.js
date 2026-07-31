@@ -34,7 +34,10 @@ const authenticate = asyncHandler(async (req, res, next) => {
     throw new ApiError(401, "Invalid access token");
   }
 
-  const user = await User.findById(payload.userId);
+  const user = await User.findById(payload.userId).populate(
+    "department",
+    "name code isActive"
+  );
 
   if (!user) {
     throw new ApiError(

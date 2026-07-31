@@ -191,6 +191,166 @@ const createCallSystemMessage = async (call, statusLabel) => {
   return formatMessage(populated, { receipts: [] });
 };
 
+const STALE_RINGING_MS = Number.parseInt(
+  process.env.CALL_STALE_RINGING_MS || "120000",
+  10
+);
+
+const STALE_ACTIVE_MS = Number.parseInt(
+  process.env.CALL_STALE_ACTIVE_MS ||
+    String(4 * 60 * 60 * 1000),
+  10
+);
+
+const finalizeStaleCall = (call) => {
+  call.isActive = false;
+  call.endedAt = new Date();
+
+  if (call.status === CALL_STATUSES.RINGING) {
+    call.status = CALL_STATUSES.MISSED;
+
+    for (const item of call.participants) {
+      if (item.status === "ringing") {
+        item.status = "missed";
+      }
+
+      if (item.status === "joined" && !item.leftAt) {
+        item.status = "left";
+        item.leftAt = new Date();
+      }
+    }
+
+    return;
+  }
+
+  call.status = CALL_STATUSES.ENDED;
+
+  for (const item of call.participants) {
+    if (["ringing", "joined"].includes(item.status)) {
+      item.status = "left";
+      item.leftAt = item.leftAt || new Date();
+    }
+  }
+
+  if (call.startedAt) {
+    call.duration = Math.max(
+      0,
+      Math.floor((call.endedAt - call.startedAt) / 1000)
+    );
+  }
+};
+
+/**
+ * Close abandoned calls so they do not block new ones.
+ */
+export const expireStaleCallsForMembers = async (
+  memberIds = []
+) => {
+  const ids = [
+    ...new Set(
+      memberIds.map(toId).filter(Boolean)
+    ),
+  ];
+
+  if (ids.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const ringingCutoff = new Date(
+    now -
+      (Number.isFinite(STALE_RINGING_MS) &&
+      STALE_RINGING_MS > 0
+        ? STALE_RINGING_MS
+        : 120_000)
+  );
+  const activeCutoff = new Date(
+    now -
+      (Number.isFinite(STALE_ACTIVE_MS) &&
+      STALE_ACTIVE_MS > 0
+        ? STALE_ACTIVE_MS
+        : 4 * 60 * 60 * 1000)
+  );
+
+  const staleCalls = await Call.find({
+    isActive: true,
+    status: {
+      $in: [
+        CALL_STATUSES.RINGING,
+        CALL_STATUSES.ACTIVE,
+      ],
+    },
+    "participants.user": { $in: ids },
+    $or: [
+      {
+        status: CALL_STATUSES.RINGING,
+        updatedAt: { $lt: ringingCutoff },
+      },
+      {
+        status: CALL_STATUSES.ACTIVE,
+        updatedAt: { $lt: activeCutoff },
+      },
+    ],
+  });
+
+  for (const call of staleCalls) {
+    finalizeStaleCall(call);
+    await call.save();
+  }
+};
+
+/**
+ * End every active call for a user (e.g. socket disconnect).
+ */
+export const endActiveCallsForUser = async (userId) => {
+  const normalizedUserId = toId(userId);
+
+  if (!normalizedUserId) {
+    return [];
+  }
+
+  await expireStaleCallsForMembers([
+    normalizedUserId,
+  ]);
+
+  const user = await User.findById(normalizedUserId);
+
+  if (!user) {
+    return [];
+  }
+
+  const activeCalls = await Call.find({
+    isActive: true,
+    status: {
+      $in: [
+        CALL_STATUSES.RINGING,
+        CALL_STATUSES.ACTIVE,
+      ],
+    },
+    "participants.user": normalizedUserId,
+  });
+
+  const results = [];
+
+  for (const call of activeCalls) {
+    try {
+      results.push(
+        await endCall(user, call._id)
+      );
+    } catch {
+      finalizeStaleCall(call);
+      await call.save();
+
+      results.push({
+        call: formatCall(call.toObject()),
+        message: null,
+      });
+    }
+  }
+
+  return results;
+};
+
 export const startCall = async (
   currentUser,
   conversationId,
@@ -212,6 +372,17 @@ export const startCall = async (
 
   assertCanStartCall(currentUser, conversation, resolvedMode);
 
+  const memberIds = (conversation.members || [])
+    .filter((member) => member.isActive)
+    .map((member) => member.user);
+
+  await expireStaleCallsForMembers(memberIds);
+
+  const currentUserId = toId(currentUser);
+  const otherMemberIds = memberIds
+    .map(toId)
+    .filter((memberId) => memberId !== currentUserId);
+
   const existingActive = await Call.findOne({
     conversation: conversationId,
     isActive: true,
@@ -227,30 +398,34 @@ export const startCall = async (
     });
   }
 
-  // Busy if any participant already in another active call (direct)
-  const memberIds = (conversation.members || [])
-    .filter((member) => member.isActive)
-    .map((member) => member.user);
+  if (
+    resolvedMode === CALL_MODES.DIRECT &&
+    otherMemberIds.length > 0
+  ) {
+    const busyCall = await Call.findOne({
+      isActive: true,
+      status: {
+        $in: [CALL_STATUSES.RINGING, CALL_STATUSES.ACTIVE],
+      },
+      "participants.user": { $in: otherMemberIds },
+    });
 
-  const busyCall = await Call.findOne({
-    isActive: true,
-    status: {
-      $in: [CALL_STATUSES.RINGING, CALL_STATUSES.ACTIVE],
-    },
-    "participants.user": { $in: memberIds },
-  });
+    if (busyCall) {
+      const otherBusy = (busyCall.participants || []).some(
+        (participant) =>
+          otherMemberIds.includes(
+            toId(participant.user)
+          ) &&
+          ["ringing", "joined"].includes(
+            participant.status
+          )
+      );
 
-  if (busyCall && resolvedMode === CALL_MODES.DIRECT) {
-    const otherBusy = (busyCall.participants || []).some(
-      (participant) =>
-        toId(participant.user) !== toId(currentUser) &&
-        ["ringing", "joined"].includes(participant.status)
-    );
-
-    if (otherBusy) {
-      throw new ApiError(409, "User is busy on another call", {
-        code: "CALL_BUSY",
-      });
+      if (otherBusy) {
+        throw new ApiError(409, "User is busy on another call", {
+          code: "CALL_BUSY",
+        });
+      }
     }
   }
 

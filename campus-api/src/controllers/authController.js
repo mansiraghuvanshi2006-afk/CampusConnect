@@ -35,6 +35,39 @@ import {
   sendVerificationEmail,
   sendWelcomeEmail,
 } from "../services/emailService.js";
+
+const DEPARTMENT_FIELDS = "name code isActive";
+
+/**
+ * Serialize a populated or raw department reference.
+ */
+const getPublicDepartment = (department) => {
+  if (!department) {
+    return null;
+  }
+
+  if (typeof department === "string" || !department.name) {
+    return {
+      id: department._id
+        ? department._id.toString()
+        : department.toString(),
+      name: department.name || null,
+      code: department.code || null,
+      isActive:
+        typeof department.isActive === "boolean"
+          ? department.isActive
+          : null,
+    };
+  }
+
+  return {
+    id: department._id.toString(),
+    name: department.name,
+    code: department.code || null,
+    isActive: department.isActive,
+  };
+};
+
 /**
  * Return only safe user information.
  *
@@ -47,7 +80,7 @@ const getPublicUser = (user) => ({
   role: user.role,
 
   // Profile fields
-  department: user.department,
+  department: getPublicDepartment(user.department),
   year: user.year,
   teachingYears:
     user.teachingYears || [],
@@ -323,7 +356,9 @@ export const login = asyncHandler(
 
     const user = await User.findOne({
       email: normalizedEmail,
-    }).select("+password");
+    })
+      .select("+password")
+      .populate("department", DEPARTMENT_FIELDS);
 
     if (!user) {
       throw new ApiError(
@@ -418,6 +453,8 @@ export const changeTemporaryPassword = asyncHandler(
     await user.save({
       validateModifiedOnly: true,
     });
+
+    await user.populate("department", DEPARTMENT_FIELDS);
 
     return res.status(200).json({
       success: true,

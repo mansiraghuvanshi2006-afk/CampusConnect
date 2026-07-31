@@ -32,6 +32,8 @@ import {
   getScopedPresenceSnapshot,
 } from "../services/chatSocketEmitter.js";
 
+import { endActiveCallsForUser } from "../services/callService.js";
+
 let ioInstance = null;
 
 /**
@@ -96,6 +98,28 @@ export const initializeSocketServer = (httpServer) => {
 
       socket.on("disconnect", async () => {
         clearAllTypingForSocket(io, socket);
+
+        try {
+          const endedCalls =
+            await endActiveCallsForUser(userId);
+
+          for (const result of endedCalls) {
+            if (!result?.call?.conversationId) {
+              continue;
+            }
+
+            io.to(
+              conversationRoom(
+                result.call.conversationId
+              )
+            ).emit("call:end", {
+              call: result.call,
+              message: result.message || null,
+            });
+          }
+        } catch {
+          // Connection may already be closing during test teardown.
+        }
 
         const result = removeSocket(userId, socket.id);
 

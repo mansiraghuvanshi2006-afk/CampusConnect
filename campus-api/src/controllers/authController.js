@@ -322,6 +322,14 @@ export const register = asyncHandler(
         expirationMinutes,
       });
     } catch (error) {
+      console.error("Verification email delivery failed", {
+        code: error?.code,
+        command: error?.command,
+        responseCode: error?.responseCode,
+        response: error?.response,
+        message: error?.message,
+      });
+
       await User.deleteOne({
         _id: user._id,
       });

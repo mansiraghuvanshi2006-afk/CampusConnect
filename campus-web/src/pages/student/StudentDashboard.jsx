@@ -63,12 +63,7 @@ const StudentDashboard = () => {
   );
 
   const departmentLabel =
-    user?.department?.name ||
-    user?.departmentName ||
-    (typeof user?.department === "string"
-      ? user.department
-      : null) ||
-    "Not set";
+    user?.department?.name || "Not set";
 
   const yearLabel =
     user?.year != null ? `Year ${user.year}` : "Not set";

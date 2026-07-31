@@ -62,12 +62,7 @@ const TeacherDashboard = () => {
   );
 
   const departmentLabel =
-    user?.department?.name ||
-    user?.departmentName ||
-    (typeof user?.department === "string"
-      ? user.department
-      : null) ||
-    "Not set";
+    user?.department?.name || "Not set";
 
   const teachingYears = Array.isArray(user?.teachingYears)
     ? user.teachingYears

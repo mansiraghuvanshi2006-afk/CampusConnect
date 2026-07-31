@@ -2,6 +2,12 @@ const getErrorMessage = (
   error,
   fallback = "Something went wrong"
 ) => {
+  const apiErrors = error?.response?.data?.errors;
+
+  if (Array.isArray(apiErrors) && apiErrors.length > 0) {
+    return apiErrors[0].message || fallback;
+  }
+
   return (
     error?.response?.data?.message ||
     error?.message ||

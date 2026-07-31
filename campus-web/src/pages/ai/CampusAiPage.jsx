@@ -54,6 +54,8 @@ const LOCAL_FALLBACK = [
   "Platform statistics",
 ];
 
+const AI_MODEL_STORAGE_KEY = "campus_connect_ai_model";
+
 const CampusAiPage = () => {
   const { conversationId } = useParams();
   const navigate = useNavigate();
@@ -62,6 +64,8 @@ const CampusAiPage = () => {
 
   const [configured, setConfigured] = useState(true);
   const [statusChecked, setStatusChecked] = useState(false);
+  const [allowedModels, setAllowedModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState("");
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [starters, setStarters] = useState([]);
@@ -84,8 +88,8 @@ const CampusAiPage = () => {
   );
 
   const goToConversation = useCallback(
-    (id) => {
-      navigate(`${roleBase}/ai${id ? `/${id}` : ""}`);
+    (id, { replace = false } = {}) => {
+      navigate(`${roleBase}/ai${id ? `/${id}` : ""}`, { replace });
     },
     [navigate, roleBase]
   );
@@ -133,6 +137,24 @@ const CampusAiPage = () => {
         }
         setConfigured(Boolean(status?.configured));
         setStarters(starterList);
+        const models = status?.allowedModels || [];
+
+        if (models.length > 0) {
+          setAllowedModels(models);
+
+          const savedModel = localStorage.getItem(AI_MODEL_STORAGE_KEY);
+          const initialModel =
+            savedModel && models.includes(savedModel)
+              ? savedModel
+              : status?.defaultModel || status?.model || models[0];
+
+          if (savedModel && !models.includes(savedModel)) {
+            localStorage.removeItem(AI_MODEL_STORAGE_KEY);
+          }
+
+          setSelectedModel(initialModel);
+          localStorage.setItem(AI_MODEL_STORAGE_KEY, initialModel);
+        }
       } catch {
         if (!cancelled) {
           setConfigured(false);
@@ -170,7 +192,7 @@ const CampusAiPage = () => {
   useEffect(() => {
     let cancelled = false;
 
-    if (!conversationId) {
+    if (!conversationId || streaming) {
       return undefined;
     }
 
@@ -195,7 +217,7 @@ const CampusAiPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, streaming]);
 
   // Clear the thread when leaving a conversation route
   useEffect(() => {
@@ -224,7 +246,7 @@ const CampusAiPage = () => {
 
     const created = await createAiConversation();
     setConversations((prev) => [created, ...prev]);
-    goToConversation(created.id);
+    goToConversation(created.id, { replace: true });
     return created.id;
   };
 
@@ -271,6 +293,13 @@ const CampusAiPage = () => {
     }
 
     setStreamText("");
+  };
+
+  const handleModelChange = (event) => {
+    const nextModel = event.target.value;
+    setSelectedModel(nextModel);
+    localStorage.setItem(AI_MODEL_STORAGE_KEY, nextModel);
+    toast.success(`Model switched to ${nextModel}`);
   };
 
   const runPrompt = async (rawPrompt, { editId = null } = {}) => {
@@ -332,6 +361,7 @@ const CampusAiPage = () => {
           conversationId: id,
           messageId: editId,
           prompt: text,
+          model: selectedModel,
           ...handlers,
         });
         await loadMessages(id);
@@ -339,6 +369,7 @@ const CampusAiPage = () => {
         await streamAiMessage({
           conversationId: id,
           prompt: text,
+          model: selectedModel,
           ...handlers,
         });
       }
@@ -380,13 +411,13 @@ const CampusAiPage = () => {
       try {
         const remote = await getAiAutocomplete({
           query: value.trim(),
-          includeAi: value.trim().length >= 8,
+          includeAi: false,
         });
         setSuggestions(remote);
       } catch {
         // Keep local suggestions
       }
-    }, 350);
+    }, 500);
   };
 
   const handleNewConversation = async () => {
@@ -471,6 +502,7 @@ const CampusAiPage = () => {
       await streamRegenerateAiMessage({
         conversationId,
         messageId,
+        model: selectedModel,
         signal: controller.signal,
         onDelta: (chunk) => setStreamText((prev) => prev + chunk),
         onDone: async (payload) => {
@@ -642,14 +674,60 @@ const CampusAiPage = () => {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-[#b5bac1] hover:bg-white/5"
-            >
-              New
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {configured && allowedModels.length > 0 && (
+                <label className="hidden items-center gap-2 sm:flex">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[#949ba4]">
+                    Model
+                  </span>
+                  <select
+                    value={selectedModel}
+                    onChange={handleModelChange}
+                    disabled={streaming}
+                    className="max-w-[11rem] rounded-xl border border-white/10 bg-black/20 px-2 py-2 text-xs text-white outline-none focus:border-purple-400 disabled:opacity-60"
+                    aria-label="Select Gemini model"
+                  >
+                    {allowedModels.map((model) => (
+                      <option key={model} value={model} className="bg-[#2b2d31]">
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <button
+                type="button"
+                onClick={handleNewConversation}
+                className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-[#b5bac1] hover:bg-white/5"
+              >
+                New
+              </button>
+            </div>
           </header>
+
+          {configured && allowedModels.length > 0 && (
+            <div className="border-b border-white/10 px-4 py-2 sm:hidden">
+              <label className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-[#949ba4]">
+                  Model
+                </span>
+                <select
+                  value={selectedModel}
+                  onChange={handleModelChange}
+                  disabled={streaming}
+                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-2 py-2 text-xs text-white outline-none focus:border-purple-400 disabled:opacity-60"
+                  aria-label="Select Gemini model"
+                >
+                  {allowedModels.map((model) => (
+                    <option key={model} value={model} className="bg-[#2b2d31]">
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {statusChecked && !configured && (
@@ -918,10 +996,23 @@ const CampusAiPage = () => {
               <textarea
                 value={prompt}
                 onChange={(event) => handleAutocomplete(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.shiftKey) {
+                    return;
+                  }
+
+                  event.preventDefault();
+
+                  if (!configured || streaming || !prompt.trim()) {
+                    return;
+                  }
+
+                  runPrompt(prompt, { editId: editingMessageId });
+                }}
                 rows={2}
                 placeholder={
                   configured
-                    ? "Message Campus AI..."
+                    ? "Message Campus AI... (Enter to send, Shift+Enter for new line)"
                     : "Campus AI is not configured"
                 }
                 disabled={!configured || streaming}

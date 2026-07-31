@@ -160,6 +160,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
         user: req.user,
         conversationId: req.params.conversationId,
         prompt: req.body.prompt,
+        model: req.body.model,
         ipAddress,
       });
 
@@ -194,6 +195,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
       user: req.user,
       conversationId: req.params.conversationId,
       prompt: req.body.prompt,
+      model: req.body.model,
       ipAddress,
       signal: abortController.signal,
       onDelta: (text) => {
@@ -232,6 +234,7 @@ export const editPrompt = asyncHandler(async (req, res) => {
       conversationId: req.params.conversationId,
       messageId: req.params.messageId,
       prompt: req.body.prompt,
+      model: req.body.model,
       ipAddress,
     });
 
@@ -261,6 +264,7 @@ export const editPrompt = asyncHandler(async (req, res) => {
       conversationId: req.params.conversationId,
       messageId: req.params.messageId,
       prompt: req.body.prompt,
+      model: req.body.model,
       ipAddress,
       signal: abortController.signal,
       onDelta: (text) => writeSse(res, "delta", { text }),
@@ -293,6 +297,7 @@ export const regenerate = asyncHandler(async (req, res) => {
       user: req.user,
       conversationId: req.params.conversationId,
       assistantMessageId: req.params.messageId,
+      model: req.body?.model || req.query?.model,
       ipAddress,
     });
 
@@ -321,6 +326,7 @@ export const regenerate = asyncHandler(async (req, res) => {
       user: req.user,
       conversationId: req.params.conversationId,
       assistantMessageId: req.params.messageId,
+      model: req.body?.model || req.query?.model,
       ipAddress,
       signal: abortController.signal,
       onDelta: (text) => writeSse(res, "delta", { text }),

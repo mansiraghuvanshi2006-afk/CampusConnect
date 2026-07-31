@@ -103,11 +103,56 @@ const TOOL_HANDLERS = {
   },
 
   async getDepartmentSummary({ user }) {
-    if (!user.department) {
-      return { message: "You are not assigned to a department." };
+    const departmentId = user.department?._id || user.department;
+
+    if (user.role === USER_ROLES.ADMIN && !departmentId) {
+      const departments = await Department.find({ isActive: true })
+        .select("name code")
+        .sort({ name: 1 })
+        .lean();
+
+      const summaries = await Promise.all(
+        departments.map(async (dept) => {
+          const [studentCount, teacherCount] = await Promise.all([
+            User.countDocuments({
+              role: USER_ROLES.STUDENT,
+              department: dept._id,
+              isActive: true,
+              isEmailVerified: true,
+            }),
+            User.countDocuments({
+              role: USER_ROLES.TEACHER,
+              department: dept._id,
+              isActive: true,
+              teacherApprovalStatus: "approved",
+            }),
+          ]);
+
+          return {
+            name: dept.name,
+            code: dept.code,
+            studentCount,
+            teacherCount,
+          };
+        })
+      );
+
+      return {
+        role: user.role,
+        note: "Admins are not assigned to one department. Here are all active departments:",
+        departments: summaries,
+        totalDepartments: summaries.length,
+      };
     }
 
-    const department = await Department.findById(user.department)
+    if (!departmentId) {
+      return {
+        message:
+          "You are not assigned to a department yet. Complete your profile or contact an administrator.",
+      };
+    }
+
+    const department = await Department.findById(departmentId)
       .select("name code isActive")
       .lean();
 

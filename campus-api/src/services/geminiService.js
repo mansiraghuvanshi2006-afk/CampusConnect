@@ -8,13 +8,105 @@
 
 let clientPromise = null;
 
+const BUILTIN_ALLOWED_MODELS = Object.freeze([
+  "gemini-flash-latest",
+  "gemini-3-flash-preview",
+  "gemini-3.5-flash",
+]);
+
+const PREFERRED_MODEL_ORDER = Object.freeze([
+  "gemini-flash-latest",
+  "gemini-3-flash-preview",
+  "gemini-3.5-flash",
+]);
+
 const getDefaultModel = () =>
-  process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  process.env.GEMINI_MODEL?.trim() || "gemini-flash-latest";
 
 const getSearchModel = () =>
   process.env.GEMINI_SEARCH_MODEL?.trim() ||
   process.env.GEMINI_MODEL?.trim() ||
-  "gemini-2.5-flash";
+  "gemini-flash-latest";
+
+export const getAllowedModels = () => {
+  const fromEnv = process.env.GEMINI_ALLOWED_MODELS?.split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return fromEnv?.length ? fromEnv : [...BUILTIN_ALLOWED_MODELS];
+};
+
+/**
+ * Pick a safe model id from the allowlist (same Google project / API key).
+ */
+export const resolveModel = (requested, { forSearch = false } = {}) => {
+  const allowed = getAllowedModels();
+  const fallback = forSearch ? getSearchModel() : getDefaultModel();
+  const normalizedFallback = allowed.includes(fallback)
+    ? fallback
+    : allowed[0];
+
+  if (!requested || typeof requested !== "string" || !requested.trim()) {
+    return normalizedFallback;
+  }
+
+  const model = requested.trim();
+
+  if (!allowed.includes(model)) {
+    const error = new Error(
+      `Model "${model}" is not allowed. Available: ${allowed.join(", ")}`
+    );
+    error.code = "AI_MODEL_NOT_ALLOWED";
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return model;
+};
+
+const getModelTryOrder = (requested, { forSearch = false } = {}) => {
+  const primary = resolveModel(requested, { forSearch });
+  const allowed = getAllowedModels();
+  const order = [primary];
+
+  for (const model of PREFERRED_MODEL_ORDER) {
+    if (model !== primary && allowed.includes(model) && !order.includes(model)) {
+      order.push(model);
+    }
+  }
+
+  for (const model of allowed) {
+    if (!order.includes(model)) {
+      order.push(model);
+    }
+  }
+
+  return order;
+};
+
+const isModelUnavailableError = (error) => {
+  const message = String(
+    error?.cause?.message || error?.message || error || ""
+  ).toLowerCase();
+  const status =
+    error?.status ||
+    error?.statusCode ||
+    error?.cause?.status ||
+    error?.cause?.statusCode;
+
+  if (status === 404 || status === 429) {
+    return true;
+  }
+
+  return (
+    message.includes("404") ||
+    message.includes("no longer available") ||
+    message.includes("not found") ||
+    message.includes("quota") ||
+    message.includes("resource_exhausted") ||
+    error?.code === "AI_QUOTA_EXCEEDED"
+  );
+};
 
 export const isGeminiConfigured = () =>
   Boolean(process.env.GEMINI_API_KEY?.trim());
@@ -64,7 +156,8 @@ export const classifyGeminiError = (error) => {
     status === 429 ||
     lower.includes("resource_exhausted") ||
     lower.includes("quota") ||
-    lower.includes("rate limit")
+    lower.includes("rate limit") ||
+    lower.includes("quota_exceeded")
   ) {
     return {
       code: "AI_QUOTA_EXCEEDED",
@@ -100,6 +193,20 @@ export const classifyGeminiError = (error) => {
       statusCode: 503,
       message: "Campus AI could not authenticate with the model provider.",
       retryable: false,
+    };
+  }
+
+  if (
+    status === 404 ||
+    lower.includes("no longer available") ||
+    lower.includes("not found")
+  ) {
+    return {
+      code: "AI_MODEL_UNAVAILABLE",
+      statusCode: 404,
+      message:
+        "The selected AI model is unavailable. Switch to gemini-flash-latest in the model menu.",
+      retryable: true,
     };
   }
 
@@ -227,56 +334,81 @@ export const createInteraction = async ({
   useSearch = false,
   previousInteractionId = null,
   signal = null,
+  model: requestedModel = null,
 }) => {
   const client = await getClient();
-  const model = useSearch ? getSearchModel() : getDefaultModel();
+  const modelsToTry = getModelTryOrder(requestedModel, { forSearch: useSearch });
+  let lastError = null;
 
-  const request = {
-    model,
-    input,
-    stream: false,
-  };
+  for (let index = 0; index < modelsToTry.length; index += 1) {
+    const model = modelsToTry[index];
 
-  if (systemInstruction) {
-    request.system_instruction = systemInstruction;
-  }
-
-  if (previousInteractionId) {
-    request.previous_interaction_id = previousInteractionId;
-  }
-
-  const toolList = [...tools];
-
-  if (useSearch) {
-    toolList.push({ type: "google_search" });
-  }
-
-  if (toolList.length > 0) {
-    request.tools = toolList;
-  }
-
-  try {
-    const interaction = await client.interactions.create(request, {
-      signal,
-    });
-
-    return {
-      text: extractTextFromInteraction(interaction),
-      citations: useSearch ? extractCitations(interaction) : [],
-      usage: extractUsage(interaction),
-      interactionId: interaction?.id || null,
+    const request = {
       model,
-      groundingUsed: useSearch,
+      input,
+      stream: false,
     };
-  } catch (error) {
-    const classified = classifyGeminiError(error);
-    const wrapped = new Error(classified.message);
-    wrapped.code = classified.code;
-    wrapped.statusCode = classified.statusCode;
-    wrapped.retryable = classified.retryable;
-    wrapped.cause = error;
-    throw wrapped;
+
+    if (systemInstruction) {
+      request.system_instruction = systemInstruction;
+    }
+
+    if (previousInteractionId) {
+      request.previous_interaction_id = previousInteractionId;
+    }
+
+    const toolList = [...tools];
+
+    if (useSearch) {
+      toolList.push({ type: "google_search" });
+    }
+
+    if (toolList.length > 0) {
+      request.tools = toolList;
+    }
+
+    try {
+      const interaction = await client.interactions.create(request, {
+        signal,
+      });
+
+      return {
+        text: extractTextFromInteraction(interaction),
+        citations: useSearch ? extractCitations(interaction) : [],
+        usage: extractUsage(interaction),
+        interactionId: interaction?.id || null,
+        model,
+        groundingUsed: useSearch,
+        modelFallbackFrom:
+          index > 0 ? modelsToTry[0] : null,
+      };
+    } catch (error) {
+      lastError = error;
+
+      if (
+        index < modelsToTry.length - 1 &&
+        isModelUnavailableError(error)
+      ) {
+        continue;
+      }
+
+      const classified = classifyGeminiError(error);
+      const wrapped = new Error(classified.message);
+      wrapped.code = classified.code;
+      wrapped.statusCode = classified.statusCode;
+      wrapped.retryable = classified.retryable;
+      wrapped.cause = error;
+      throw wrapped;
+    }
   }
+
+  const classified = classifyGeminiError(lastError);
+  const wrapped = new Error(classified.message);
+  wrapped.code = classified.code;
+  wrapped.statusCode = classified.statusCode;
+  wrapped.retryable = classified.retryable;
+  wrapped.cause = lastError;
+  throw wrapped;
 };
 
 /**
@@ -288,102 +420,195 @@ export const streamInteraction = async function* ({
   useSearch = false,
   previousInteractionId = null,
   signal = null,
+  model: requestedModel = null,
 }) {
   const client = await getClient();
-  const model = useSearch ? getSearchModel() : getDefaultModel();
+  const modelsToTry = getModelTryOrder(requestedModel, { forSearch: useSearch });
+  let lastError = null;
 
-  const request = {
-    model,
-    input,
-    stream: true,
-  };
+  for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex += 1) {
+    const model = modelsToTry[modelIndex];
 
-  if (systemInstruction) {
-    request.system_instruction = systemInstruction;
-  }
+    const request = {
+      model,
+      input,
+      stream: true,
+    };
 
-  if (previousInteractionId) {
-    request.previous_interaction_id = previousInteractionId;
-  }
+    if (systemInstruction) {
+      request.system_instruction = systemInstruction;
+    }
 
-  if (useSearch) {
-    request.tools = [{ type: "google_search" }];
-  }
+    if (previousInteractionId) {
+      request.previous_interaction_id = previousInteractionId;
+    }
 
-  let fullText = "";
-  let interactionId = null;
-  let finalInteraction = null;
+    if (useSearch) {
+      request.tools = [{ type: "google_search" }];
+    }
 
-  try {
-    const stream = await client.interactions.create(request, {
-      signal,
-    });
+    let fullText = "";
+    let interactionId = null;
+    let finalInteraction = null;
+    let streamError = null;
 
-    for await (const event of stream) {
-      if (signal?.aborted) {
-        break;
-      }
+    try {
+      const stream = await client.interactions.create(request, {
+        signal,
+      });
 
-      if (event?.interaction?.id) {
-        interactionId = event.interaction.id;
-      }
+      for await (const event of stream) {
+        if (signal?.aborted) {
+          break;
+        }
 
-      if (event?.event_type === "step.delta") {
-        const delta = event.delta;
+        if (event?.interaction?.id) {
+          interactionId = event.interaction.id;
+        }
 
-        if (delta?.type === "text" && delta.text) {
-          fullText += delta.text;
-          yield { type: "delta", text: delta.text };
+        if (event?.event_type === "error" || event?.error) {
+          streamError = {
+            message: event.error?.message || "Gemini stream error",
+            code: event.error?.code,
+            status: event.error?.code === "quota_exceeded" ? 429 : undefined,
+          };
+          break;
+        }
+
+        if (event?.event_type === "step.delta") {
+          const delta = event.delta;
+
+          if (delta?.type === "text" && delta.text) {
+            fullText += delta.text;
+            yield { type: "delta", text: delta.text };
+          }
+        }
+
+        const inlineDelta =
+          (typeof event?.delta?.text === "string" && event.delta.text) ||
+          (typeof event?.output_text_delta === "string" &&
+            event.output_text_delta) ||
+          (typeof event?.text === "string" && event.text) ||
+          "";
+
+        if (
+          inlineDelta &&
+          event?.event_type !== "step.delta"
+        ) {
+          fullText += inlineDelta;
+          yield { type: "delta", text: inlineDelta };
+        }
+
+        if (
+          event?.event_type === "interaction.completed" ||
+          event?.event_type === "interaction.complete"
+        ) {
+          finalInteraction = event.interaction || event;
+          const completedText = extractTextFromInteraction(finalInteraction);
+
+          if (completedText && completedText.length > fullText.length) {
+            const remainder = completedText.slice(fullText.length);
+
+            if (remainder) {
+              fullText = completedText;
+              yield { type: "delta", text: remainder };
+            } else {
+              fullText = completedText;
+            }
+          }
         }
       }
 
-      if (
-        event?.event_type === "interaction.completed" ||
-        event?.event_type === "interaction.complete"
-      ) {
-        finalInteraction = event.interaction || event;
+      if (streamError) {
+        if (
+          !fullText &&
+          modelIndex < modelsToTry.length - 1 &&
+          isModelUnavailableError(streamError)
+        ) {
+          lastError = streamError;
+          continue;
+        }
+
+        const classified = classifyGeminiError(streamError);
+        yield {
+          type: "error",
+          code: classified.code,
+          message: classified.message,
+          retryable: classified.retryable,
+          text: fullText,
+        };
+
+        return;
       }
-    }
 
-    const citations = useSearch
-      ? extractCitations(finalInteraction || { outputs: [{ text: fullText }] })
-      : [];
-    const usage = extractUsage(finalInteraction || {});
+      if (!fullText && finalInteraction) {
+        fullText = extractTextFromInteraction(finalInteraction);
+      }
 
-    yield {
-      type: "done",
-      text: fullText,
-      citations,
-      usage,
-      interactionId,
-      model,
-      groundingUsed: useSearch,
-      aborted: Boolean(signal?.aborted),
-    };
-  } catch (error) {
-    if (signal?.aborted) {
+      const citations = useSearch
+        ? extractCitations(finalInteraction || { outputs: [{ text: fullText }] })
+        : [];
+      const usage = extractUsage(finalInteraction || {});
+
       yield {
         type: "done",
         text: fullText,
-        citations: [],
-        usage: { promptTokens: 0, completionTokens: 0 },
+        citations,
+        usage,
         interactionId,
         model,
         groundingUsed: useSearch,
-        aborted: true,
+        aborted: Boolean(signal?.aborted),
+        modelFallbackFrom:
+          modelIndex > 0 ? modelsToTry[0] : null,
       };
+
+      return;
+    } catch (error) {
+      if (signal?.aborted) {
+        yield {
+          type: "done",
+          text: fullText,
+          citations: [],
+          usage: { promptTokens: 0, completionTokens: 0 },
+          interactionId,
+          model,
+          groundingUsed: useSearch,
+          aborted: true,
+        };
+        return;
+      }
+
+      lastError = error;
+
+      if (
+        modelIndex < modelsToTry.length - 1 &&
+        isModelUnavailableError(error)
+      ) {
+        continue;
+      }
+
+      const classified = classifyGeminiError(error);
+      yield {
+        type: "error",
+        code: classified.code,
+        message: classified.message,
+        retryable: classified.retryable,
+        text: fullText,
+      };
+
       return;
     }
-
-    const classified = classifyGeminiError(error);
-    yield {
-      type: "error",
-      code: classified.code,
-      message: classified.message,
-      retryable: classified.retryable,
-      text: fullText,
-    };
   }
+
+  const classified = classifyGeminiError(lastError);
+  yield {
+    type: "error",
+    code: classified.code,
+    message: classified.message,
+    retryable: classified.retryable,
+    text: "",
+  };
 };
 
 /**
@@ -394,6 +619,7 @@ export const generateShortText = async ({
   prompt,
   systemInstruction,
   maxRetries = 1,
+  model = null,
 }) => {
   let attempt = 0;
   let lastError = null;
@@ -406,6 +632,7 @@ export const generateShortText = async ({
         input: prompt,
         systemInstruction,
         useSearch: false,
+        model,
       });
 
       return result.text?.trim() || "";
@@ -420,8 +647,15 @@ export const generateShortText = async ({
   throw lastError;
 };
 
-export const getGeminiStatus = () => ({
-  configured: isGeminiConfigured(),
-  model: getDefaultModel(),
-  searchModel: getSearchModel(),
-});
+export const getGeminiStatus = () => {
+  const allowedModels = getAllowedModels();
+  const defaultModel = resolveModel(null, { forSearch: false });
+
+  return {
+    configured: isGeminiConfigured(),
+    model: defaultModel,
+    searchModel: resolveModel(null, { forSearch: true }),
+    defaultModel,
+    allowedModels,
+  };
+};

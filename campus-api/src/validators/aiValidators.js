@@ -17,6 +17,8 @@ export const renameAiConversationSchema = z
   })
   .strict();
 
+const optionalModel = z.string().trim().min(3).max(80).optional();
+
 export const sendAiMessageSchema = z
   .object({
     prompt: z
@@ -30,6 +32,7 @@ export const sendAiMessageSchema = z
           8000
       ),
     stream: z.boolean().optional().default(true),
+    model: optionalModel,
   })
   .strict();
 
@@ -43,6 +46,8 @@ export const editAiPromptSchema = z
         Number.parseInt(process.env.AI_MAX_PROMPT_LENGTH || "8000", 10) ||
           8000
       ),
+    stream: z.boolean().optional(),
+    model: optionalModel,
   })
   .strict();
 

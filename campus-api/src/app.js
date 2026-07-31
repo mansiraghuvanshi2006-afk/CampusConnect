@@ -12,6 +12,7 @@ import adminRoutes from "./routes/adminRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
+import contactRoutes from "./routes/contactRoutes.js";
 
 import notFound from "./middleware/notFound.js";
 import errorHandler from "./middleware/errorHandler.js";
@@ -102,6 +103,9 @@ app.use("/api/v1/ai", aiRoutes);
 
 // Account settings
 app.use("/api/v1/settings", settingsRoutes);
+
+// Public contact form
+app.use("/api/v1/contact", contactRoutes);
 
 // Handle unknown routes
 app.use(notFound);

@@ -6,6 +6,7 @@ import AiMessage, {
 import ApiError from "../utils/ApiError.js";
 import {
   detectAiMode,
+  buildToolArgsFromPrompt,
   filterLocalSuggestions,
   getFollowUpSuggestions,
   getStarterPrompts,
@@ -36,8 +37,15 @@ const MAX_PROMPT_LENGTH = Number.parseInt(
 const SYSTEM_PROMPT = `You are Campus AI, the helpful assistant built into CampusConnect.
 Be concise, accurate and friendly.
 Use markdown when helpful (lists, tables, code fences with language tags).
-Never invent campus-specific private data. When campus context is provided below, treat it as the only authoritative campus data.
-Never ask for or repeat passwords, JWT tokens, API keys or secrets.
+Never invent campus-specific private data. When campus context is provided below, treat it as the only authoritative campus data and answer directly from it.
+When Authorized campus data is included, NEVER say you lack access to the user's department, year, or profile — that data is already fetched for you.
+The user may type casual or misspelled English (e.g. "stundet", "naem", "depatment") — still answer from the authorized campus data when it is present.
+You MAY share from authorized campus data: the user's name, role (student/teacher/admin), department, academic year, teaching years, designation, student/teacher names they are allowed to see, and counts (how many students, teachers, etc.).
+For messy questions that ask for several things at once (name + student count + basic info), answer all parts in one clear reply using the tool results.
+Teachers: use department and teachingYears from the data (teachers do not have a student year field). Include how many students are in each teaching year when that data is present.
+Students: use department and year from the data.
+Admins: use platform and department summaries for totals across the campus.
+NEVER reveal, ask for, or discuss passwords, password hashes, JWT tokens, API keys, refresh tokens, or other secrets — not for any user.
 If live web grounding is unavailable, clearly say current information could not be verified instead of inventing current facts.`;
 
 const serializeConversation = (conversation) => ({
@@ -323,6 +331,7 @@ export const sendAiMessage = async ({
   ipAddress = null,
   signal = null,
   onDelta = null,
+  model: requestedModel = null,
 }) => {
   if (!isGeminiConfigured()) {
     throw Object.assign(new Error("Campus AI is not configured."), {
@@ -350,6 +359,7 @@ export const sendAiMessage = async ({
     const toolRun = await runCampusTools({
       user,
       toolNames: detection.tools,
+      argsByTool: buildToolArgsFromPrompt(prompt, detection.tools),
       conversationId: conversation._id,
       ipAddress,
     });
@@ -429,6 +439,7 @@ export const sendAiMessage = async ({
       useSearch,
       previousInteractionId: null,
       signal,
+      model: requestedModel,
     })) {
       if (event.type === "delta" && event.text) {
         assistantText += event.text;
@@ -482,6 +493,23 @@ export const sendAiMessage = async ({
       }
     } else {
       await tryStream(false);
+
+      if (!assistantText.trim() && status !== "error") {
+        const fallback = await createInteraction({
+          input,
+          systemInstruction: SYSTEM_PROMPT,
+          useSearch: false,
+          previousInteractionId: conversation.lastInteractionId || null,
+          signal,
+          model: requestedModel,
+        });
+
+        assistantText = fallback.text || "";
+        citations = fallback.citations || citations;
+        usage = fallback.usage || usage;
+        model = fallback.model || model;
+        interactionId = fallback.interactionId || interactionId;
+      }
     }
   } catch (error) {
     status = "error";
@@ -520,7 +548,7 @@ export const sendAiMessage = async ({
     conversation: conversation._id,
     user: user._id,
     role: AI_MESSAGE_ROLES.ASSISTANT,
-    content: assistantText || "I could not generate a response.",
+    content: assistantText || "Campus AI could not complete this request. Please wait a moment and try again.",
     mode: detection.mode,
     model,
     promptTokens: usage.promptTokens,
@@ -568,6 +596,7 @@ export const editAiPrompt = async ({
   ipAddress,
   signal,
   onDelta,
+  model = null,
 }) => {
   const conversation = await assertOwnsConversation(
     user._id,
@@ -602,6 +631,7 @@ export const editAiPrompt = async ({
     ipAddress,
     signal,
     onDelta,
+    model,
   });
 };
 
@@ -612,6 +642,7 @@ export const regenerateAiMessage = async ({
   ipAddress,
   signal,
   onDelta,
+  model = null,
 }) => {
   await assertOwnsConversation(user._id, conversationId);
 
@@ -648,6 +679,7 @@ export const regenerateAiMessage = async ({
     ipAddress,
     signal,
     onDelta,
+    model,
   });
 };
 
@@ -697,7 +729,7 @@ export const getAiAutocomplete = async (
     suggestions.push({ text: item, source: "local" });
   }
 
-  if (includeAi && isGeminiConfigured() && q.length >= 8 && suggestions.length < 6) {
+  if (includeAi && isGeminiConfigured() && q.length >= 16 && suggestions.length < 6) {
     try {
       const text = await generateShortText({
         prompt: `Suggest 3 short autocomplete completions for a campus AI chat box. Query: "${q}". Reply as a plain list, one per line, no numbering.`,

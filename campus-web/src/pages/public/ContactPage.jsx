@@ -8,11 +8,16 @@ import {
 import toast from "react-hot-toast";
 
 import campusLogo from "../../assets/campus-logo.png";
+import {
+  ADMIN_CONTACT_EMAIL,
+  submitContactForm,
+} from "../../services/contactService.js";
+import getErrorMessage from "../../utils/getErrorMessage.js";
 
 const contactDetails = [
   {
     title: "Support email",
-    value: "mansiraghuvanshi2006@gmail.com",
+    value: ADMIN_CONTACT_EMAIL,
     description: "We usually reply within 24 hours on working days.",
     icon: FiMail,
   },
@@ -33,26 +38,40 @@ const contactDetails = [
 const ContactPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setIsSubmitting(true);
 
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const name = formData.get("name");
     const email = formData.get("email");
     const subject = formData.get("subject");
     const message = formData.get("message");
 
-    const mailtoLink = `mailto:mansiraghuvanshi2006@gmail.com?subject=${encodeURIComponent(
-      `[CampusConnect] ${subject}`
-    )}&body=${encodeURIComponent(
-      `Name: ${name}\nEmail: ${email}\n\n${message}`
-    )}`;
+    try {
+      const response = await submitContactForm({
+        name,
+        email,
+        subject,
+        message,
+      });
 
-    window.location.href = mailtoLink;
-    toast.success("Opening your email app to send the message");
-    setIsSubmitting(false);
-    event.currentTarget.reset();
+      toast.success(
+        response?.message ||
+          "Message sent! We will reply to your email soon."
+      );
+      form.reset();
+    } catch (error) {
+      toast.error(
+        getErrorMessage(
+          error,
+          "Unable to send your message. Please try again."
+        )
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -126,8 +145,11 @@ const ContactPage = () => {
               </h2>
 
               <p className="mt-2 text-sm text-blue-100/65">
-                Fill in the form and we&apos;ll open your email app with the
-                message ready to send.
+                Fill in the form and your message will be delivered to{" "}
+                <span className="font-medium text-white">
+                  {ADMIN_CONTACT_EMAIL}
+                </span>
+                .
               </p>
             </div>
 
@@ -149,6 +171,7 @@ const ContactPage = () => {
                     name="name"
                     type="text"
                     required
+                    minLength={2}
                     placeholder="Your full name"
                     className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
                   />
@@ -186,6 +209,7 @@ const ContactPage = () => {
                   name="subject"
                   type="text"
                   required
+                  minLength={3}
                   placeholder="How can we help?"
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
                 />
@@ -203,10 +227,16 @@ const ContactPage = () => {
                   id="contact-message"
                   name="message"
                   required
+                  minLength={10}
                   rows={5}
                   placeholder="Tell us about your campus or question..."
+                  title="Message must contain at least 10 characters"
                   className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
                 />
+
+                <p className="mt-2 text-xs text-blue-100/50">
+                  Please write at least 10 characters in your message.
+                </p>
               </div>
 
               <button
@@ -215,7 +245,7 @@ const ContactPage = () => {
                 className="gradient-button inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold text-white shadow-lg shadow-purple-950/30 transition hover:-translate-y-0.5 disabled:opacity-60"
               >
                 <FiSend size={18} />
-                {isSubmitting ? "Opening email..." : "Send message"}
+                {isSubmitting ? "Sending..." : "Send message"}
               </button>
             </form>
           </div>

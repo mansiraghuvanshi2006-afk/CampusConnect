@@ -193,6 +193,7 @@ export const deleteAiMessage = async (conversationId, messageId) => {
 export const streamAiMessage = async ({
   conversationId,
   prompt,
+  model,
   signal,
   onDelta,
   onDone,
@@ -204,7 +205,7 @@ export const streamAiMessage = async ({
       method: "POST",
       credentials: "include",
       headers: getAuthHeaders(),
-      body: JSON.stringify({ prompt, stream: true }),
+      body: JSON.stringify({ prompt, stream: true, model: model || undefined }),
       signal,
     }
   );
@@ -216,6 +217,7 @@ export const streamEditAiPrompt = async ({
   conversationId,
   messageId,
   prompt,
+  model,
   signal,
   onDelta,
   onDone,
@@ -227,7 +229,11 @@ export const streamEditAiPrompt = async ({
       method: "POST",
       credentials: "include",
       headers: getAuthHeaders(),
-      body: JSON.stringify({ prompt, stream: true }),
+      body: JSON.stringify({
+        prompt,
+        stream: true,
+        model: model || undefined,
+      }),
       signal,
     }
   );
@@ -238,6 +244,7 @@ export const streamEditAiPrompt = async ({
 export const streamRegenerateAiMessage = async ({
   conversationId,
   messageId,
+  model,
   signal,
   onDelta,
   onDone,
@@ -249,7 +256,7 @@ export const streamRegenerateAiMessage = async ({
       method: "POST",
       credentials: "include",
       headers: getAuthHeaders(),
-      body: JSON.stringify({}),
+      body: JSON.stringify({ model: model || undefined }),
       signal,
     }
   );

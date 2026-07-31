@@ -37,6 +37,10 @@ if (!Number.isInteger(emailPort)) {
   );
 }
 
+// Gmail app passwords are shown with spaces but must be used without them.
+const emailPassword =
+  process.env.EMAIL_PASSWORD?.replace(/\s/g, "") || "";
+
 const emailTransporter =
   nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -46,7 +50,7 @@ const emailTransporter =
 
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD,
+      pass: emailPassword,
     },
 
     connectionTimeout: 10_000,
